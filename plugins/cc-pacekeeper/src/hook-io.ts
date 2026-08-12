@@ -13,6 +13,12 @@ const HookStdinSchema = z.object({
     // SessionStart includes the active model id directly. Other events don't,
     // so we fall back to reading it from the transcript.
     model: z.string().optional(),
+    // Stop/SubagentStop only: true when Claude Code is ALREADY continuing as a
+    // result of a prior stop-hook injection. additionalContext on a Stop hook
+    // re-opens the turn under the same continuation cap as decision:block, so a
+    // directive that re-injects every turn loops until the harness force-ends.
+    // tick.ts reads this to stay silent inside a continuation it already fed.
+    stop_hook_active: z.boolean().optional(),
     // Present only inside subagent hook calls (any tool event at any nesting
     // depth). Absent on the main thread — that absence is how tick.ts tells
     // main-thread vs. subagent branches apart.
