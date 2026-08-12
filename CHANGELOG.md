@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2]
+
+One fix: a `Stop`-hook directive no longer runs the turn into Claude Code's
+continuation cap.
+
+### Fixed
+
+- **`Stop`/`SubagentStop` directives no longer loop until the harness force-ends the
+  turn.** A directive injected via `additionalContext` on a `Stop` hook re-opens the
+  turn under the same continuation cap as `decision: "block"`. The plugin never read the
+  `stop_hook_active` input, so once a directive fired, Claude would read it, try to end
+  the turn, get continued, and repeat — up to the harness's limit, which then overrode
+  with "A hook blocked the turn from ending N consecutive times." Observed re-firing on a
+  ~30-minute cadence across an idle overnight session. The hook now reads
+  `stop_hook_active` and stays silent on any `Stop`/`SubagentStop` that fires only
+  because a prior directive re-opened the turn, bounding the churn at one continuation.
+  (The plugin's once-per-block directives already self-suppress across ticks; a
+  regression test now locks that in as defense in depth.)
+
 ## [0.8.1]
 
 Two in-session fixes: the "limits remain elevated" checkpoint reminder no longer loops,
