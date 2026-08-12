@@ -368,4 +368,17 @@ describe('stop_hook_active continuation guard', () => {
         });
         expect(out).toBe('{}');
     });
+
+    // Defense in depth for the loop: even WITHOUT the stop_hook_active flag, a
+    // once-per-block Stop directive must fire at most once across repeated plain
+    // Stops in the same block — its idempotency arming and its emission share a
+    // tick, so the second Stop already self-suppresses. Locks that in so a future
+    // change can't silently reintroduce the churn on harnesses that omit the flag.
+    test('a once-per-block Stop directive does not re-fire on the next plain Stop', () => {
+        writeUsage(86, 2 * 3600_000); // 5h at warn+ → auto-renewal directive on Stop
+        const sid = newSid();
+        expect(runTick({ session_id: sid, hook_event_name: 'Stop' })).toContain('auto-renewal');
+        expect(runTick({ session_id: sid, hook_event_name: 'Stop' })).toBe('{}');
+        expect(runTick({ session_id: sid, hook_event_name: 'Stop' })).toBe('{}');
+    });
 });
