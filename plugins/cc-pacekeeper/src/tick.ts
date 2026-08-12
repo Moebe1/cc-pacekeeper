@@ -68,6 +68,16 @@ async function main(): Promise<void> {
         return;
     }
 
+    // A Stop/SubagentStop directive goes out as additionalContext, which re-opens
+    // the turn under the same continuation cap as decision:block. When we're only
+    // firing BECAUSE a prior directive re-opened the turn (stop_hook_active), Claude
+    // has already seen it — re-injecting is the loop that ends in the harness's
+    // "hook blocked the turn from ending N consecutive times" override. Stay silent.
+    if (stdin.stop_hook_active && (event === 'Stop' || event === 'SubagentStop')) {
+        emitEmpty();
+        return;
+    }
+
     if (event === 'SubagentStart') {
         emitAdditionalContext(event, await buildSubagentStartContext(stdin, cfg, sessionId, agentId, agentType));
         return;

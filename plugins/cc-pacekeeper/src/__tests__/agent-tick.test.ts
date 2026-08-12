@@ -343,3 +343,29 @@ describe('dispatch advisory', () => {
         expect(out).not.toContain('"decision":"block"');
     });
 });
+
+describe('stop_hook_active continuation guard', () => {
+    // A Stop directive goes out as additionalContext, which re-opens the turn
+    // under Claude Code's continuation cap. Once we're inside that continuation
+    // (stop_hook_active), re-injecting the same directive is the loop that ends
+    // in the harness's "hook blocked the turn from ending N times" override.
+    test('a Stop that WOULD fire a directive stays silent when stop_hook_active', () => {
+        writeUsage(86, 2 * 3600_000); // 5h at warn+ → auto-renewal directive on Stop
+        const sid = newSid();
+        // Normal Stop (not a continuation): the directive fires.
+        const first = runTick({ session_id: sid, hook_event_name: 'Stop' });
+        expect(first).toContain('auto-renewal');
+        // A fresh session in the same state, but flagged as a continuation:
+        // silent, so the loop is bounded at one turn instead of the cap.
+        const cont = runTick({ session_id: newSid(), hook_event_name: 'Stop', stop_hook_active: true });
+        expect(cont).toBe('{}');
+    });
+
+    test('SubagentStop is silenced under stop_hook_active too', () => {
+        const out = runTick({
+            session_id: newSid(), hook_event_name: 'SubagentStop',
+            agent_id: 'ag-cont', stop_hook_active: true
+        });
+        expect(out).toBe('{}');
+    });
+});
