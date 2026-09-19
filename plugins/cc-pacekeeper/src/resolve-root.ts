@@ -184,10 +184,9 @@ export function resolveProjectRoot(input: ResolveInput): string {
  * The transcript for a session id, found by scanning every project directory
  * under `<configDir>/projects/` for `<sessionId>.jsonl` (the project-dir
  * naming rule is not relied on). Newest mtime wins if several exist. Undefined
- * when none —
- * never throws. Lets `save` capture meters and anchor the root from the id
- * alone, since the Bash tool exports CLAUDE_CODE_SESSION_ID but no
- * transcript path.
+ * when none — never throws. Lets `save` capture meters and anchor the root
+ * from the id alone, since the Bash tool exports CLAUDE_CODE_SESSION_ID but
+ * no transcript path.
  */
 export function transcriptPathForSession(sessionId: string, configDir: string = getClaudeConfigDir()): string | undefined {
     if (!sessionId || /[\\/]/.test(sessionId)) return undefined;

@@ -588,9 +588,13 @@ async function main(): Promise<void> {
     // Anchor the checkpoint dir to the real project root — independent of the
     // shell/tmux/cd the CLI was launched from. Throws (caught below) if only a
     // transient dir like /tmp is available.
+    // The session id alone anchors the root, as SKILL.md promises: its
+    // transcript records the cwd the session really runs in.
+    const sidFlag = sessionIdFlagOf(args);
+    const transcriptFlag = typeof args.flags['transcript-path'] === 'string' ? args.flags['transcript-path'] : undefined;
     const cwd = resolveProjectRoot({
         cwdFlag: typeof args.flags.cwd === 'string' ? args.flags.cwd : undefined,
-        transcriptPath: typeof args.flags['transcript-path'] === 'string' ? args.flags['transcript-path'] : undefined,
+        transcriptPath: transcriptFlag ?? (sidFlag ? transcriptPathForSession(sidFlag) : undefined),
         processCwd: process.cwd()
     });
 

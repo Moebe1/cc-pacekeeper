@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -6,6 +7,10 @@ import * as path from 'path';
 import { saveCheckpoint, listActive, listArchive, readCheckpoint } from '../checkpoint';
 import { DEFAULT_CONFIG } from '../config';
 import { parseArgs, verbCleanup, verbDiscard, verbList, verbPeek, verbResume, verbSave } from '../checkpoint-cli';
+
+const CLI = path.join(import.meta.dir, '..', 'checkpoint-cli.ts');
+// Safe-root fixtures cannot live under the tmpdir (resolveProjectRoot refuses it).
+const FIXTURE_BASE = path.join(import.meta.dir, '.cli-fixtures');
 
 const CHECKPOINT_DIR = '.claude-checkpoints';
 const cfg = DEFAULT_CONFIG;
@@ -359,6 +364,42 @@ describe('save: goal lock', () => {
         const saved = listActive(CWD, CHECKPOINT_DIR)[0]!;
         expect(saved.frontmatter.session_id).toBe('sid-9');
         expect((saved.frontmatter.meters as Record<string, unknown>).context_pct).toBe(25);
-        fs.rmSync(cfgDir, { recursive: true, force: true });
+    });
+});
+
+describe('save: root anchored from the session transcript', () => {
+    // SKILL.md promises the id alone is enough to anchor the checkpoint, so
+    // main() must derive the transcript before resolving the root. Run from a
+    // directory the resolver refuses, to prove the transcript is what saves it.
+    test('with only --session-id, the checkpoint lands in the transcript cwd', () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-anchor-home-'));
+        const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-anchor-cwd-'));
+        // The project must be a safe root, and everything under the tmpdir is
+        // refused — so stage a throwaway repo beside this test file.
+        fs.mkdirSync(FIXTURE_BASE, { recursive: true });
+        const proj = fs.mkdtempSync(path.join(FIXTURE_BASE, 'anchor-'));
+        try {
+            execFileSync('git', ['init', '-q', '-b', 'main', proj]);
+            const cfgDir = path.join(home, '.claude');
+            fs.mkdirSync(path.join(cfgDir, 'projects', '-proj'), { recursive: true });
+            fs.writeFileSync(
+                path.join(cfgDir, 'projects', '-proj', 'sid-anchor.jsonl'),
+                JSON.stringify({ type: 'user', cwd: proj, sessionId: 'sid-anchor' }) + '\n'
+            );
+            const body = path.join(home, 'b.md');
+            fs.writeFileSync(body, '## Goal\nG\n');
+
+            const res = spawnSync(
+                'bun',
+                ['run', '--silent', CLI, 'save', '--name', 'lane', '--session-id', 'sid-anchor', '--body-file', body],
+                { cwd: elsewhere, encoding: 'utf8', env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: cfgDir } }
+            );
+            expect(res.status).toBe(0);
+            expect(listActive(proj, CHECKPOINT_DIR)).toHaveLength(1);
+        } finally {
+            fs.rmSync(home, { recursive: true, force: true });
+            fs.rmSync(elsewhere, { recursive: true, force: true });
+            fs.rmSync(proj, { recursive: true, force: true });
+        }
     });
 });
