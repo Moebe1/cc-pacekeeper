@@ -341,9 +341,9 @@ describe('newestSince', () => {
         expect(newestSince(CWD, CHECKPOINT_DIR, since, SID)!.body).toContain('Unstamped');
     });
 
-    // What every real save writes today: the skill passes
-    // --session-id "$CLAUDE_SESSION_ID", that variable is empty in the Bash
-    // tool environment, and the frontmatter parser reads an empty scalar as {}.
+    // What every checkpoint saved before the skill named the real env var has
+    // on disk: the key with an empty value, from a flag that expanded to
+    // nothing. It is this session's record as much as an unstamped one.
     test('keeps a checkpoint whose session_id line is present but empty', () => {
         const since = Date.parse('2026-06-01T00:00:00.000Z');
         const dir = path.join(CWD, CHECKPOINT_DIR);
@@ -427,5 +427,27 @@ describe('laneGoalAnchor', () => {
     test('a checkpoint without a Goal section is not an anchor', () => {
         saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane', created_at: '2026-06-14T00:00:00.000Z' }, body: '## Status\n- x\n' });
         expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)).toBeNull();
+    });
+});
+
+describe('parseYaml empty scalars', () => {
+    test('a key with no value and no children reads back as an empty string, not {}', () => {
+        const dir = path.join(CWD, CHECKPOINT_DIR);
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, 'lane-2026-06-01T00-00-00Z.md');
+        fs.writeFileSync(file, '---\nstatus: active\ncreated_at: "2026-06-01T00:00:00.000Z"\nsession_id:\nname: lane\n---\n\n## Goal\nG\n');
+        const ckpt = readCheckpoint(file)!;
+        expect(ckpt.frontmatter.session_id).toBe('');
+        expect(ckpt.frontmatter.name).toBe('lane');
+    });
+
+    test('a key followed by indented children is still an object or array', () => {
+        const dir = path.join(CWD, CHECKPOINT_DIR);
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, 'lane-2026-06-01T00-00-01Z.md');
+        fs.writeFileSync(file, '---\nstatus: active\ncreated_at: "2026-06-01T00:00:00.000Z"\nmeters:\n  five_hour_pct: 37\nfiles_touched:\n  - a.ts\n---\n\nbody\n');
+        const fm = readCheckpoint(file)!.frontmatter;
+        expect(fm.meters).toEqual({ five_hour_pct: 37 });
+        expect(fm.files_touched).toEqual(['a.ts']);
     });
 });

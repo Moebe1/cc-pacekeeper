@@ -156,7 +156,10 @@ function parseYaml(yaml: string): Record<string, unknown> {
                 const dedented = childLines.map(l => l.replace(/^\s{2}/, '')).join('\n');
                 out[key] = parseYaml(dedented);
             } else {
-                out[key] = {};
+                // `key:` with nothing after it and no indented children is an
+                // empty scalar. (`{}` here made `session_id?: string` a lie for
+                // blank values and broke `=== undefined` guards downstream.)
+                out[key] = '';
             }
             i = j;
         } else {
@@ -325,9 +328,9 @@ export function newestSince(
         Date.parse(c.frontmatter.created_at) || 0,
         c.frontmatter.resumed_at ? (Date.parse(c.frontmatter.resumed_at) || 0) : 0
     );
-    // A blank `session_id:` line parses to {}, not to a string — older saves
-    // (and any `--session-id "$CLAUDE_SESSION_ID"` with the variable unset)
-    // look like that, and they must count as unstamped, not as someone else's.
+    // Every checkpoint saved while the skill named a nonexistent env var got a
+    // blank `session_id:` line, and any `--session-id ""` still would. Blank
+    // means unstamped, not someone else's.
     const mine = (c: Checkpoint): boolean => {
         const sid = c.frontmatter.session_id;
         return typeof sid !== 'string' || sid === '' || sid === sessionId;
