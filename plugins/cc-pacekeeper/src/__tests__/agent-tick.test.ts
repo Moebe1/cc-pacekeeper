@@ -203,8 +203,10 @@ describe('ctx auto-save crossing re-arm [G4]', () => {
             { DISABLE_AUTO_COMPACT: '1' }
         );
         expect(out).toContain('Context window at critical');
-        expect(out).toContain('start a fresh session from this checkpoint');
+        expect(out).toContain('start a fresh session from that checkpoint');
         expect(out).not.toContain('re-injects this checkpoint');
+        // There is no compaction to wait for, so it must not say to wait for one.
+        expect(out).not.toContain('until compaction runs');
     });
 
     test('combined 5h+ctx: single auto-loop directive covers both, ctx directive suppressed', () => {

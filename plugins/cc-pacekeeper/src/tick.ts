@@ -947,15 +947,13 @@ function formatDispatchAdvisory(snap: Snapshot): string | null {
  */
 function formatCtxAutoSaveDirective(snap: Snapshot, opts: { mainThread: boolean; autoCompact: boolean }): string {
     const status = formatStatusLine(snap);
-    const closing = !opts.mainThread
-        ? ''
-        : opts.autoCompact
-            ? ' Do not start a new session for this: when Claude Code compacts, pacekeeper re-injects this checkpoint.'
-            : ' Auto-compaction is off in this session: start a fresh session from this checkpoint before the context limit.';
+    const tail = opts.autoCompact
+        ? `, then continue on small steps until compaction runs.${opts.mainThread ? ' Do not start a new session for this: when Claude Code compacts, pacekeeper re-injects this checkpoint.' : ''}`
+        : ', then start a fresh session from that checkpoint before the context limit — auto-compaction is off in this session, so the limit ends the session instead of compacting.';
     return [
         status,
         '',
-        `🛑 Context window at critical — save now, do not ask: run /cc-pacekeeper:checkpoint save immediately, then continue on small steps until compaction runs.${closing}`
+        `🛑 Context window at critical — save now, do not ask: run /cc-pacekeeper:checkpoint save immediately${tail}`
     ].join('\n');
 }
 
