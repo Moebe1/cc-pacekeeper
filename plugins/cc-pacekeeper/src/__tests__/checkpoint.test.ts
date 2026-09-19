@@ -7,11 +7,14 @@ import { execFileSync } from 'child_process';
 
 import {
     archiveCheckpoint,
+    goalSection,
+    laneGoalAnchor,
     laneOf,
     listActive,
     listArchive,
     listLive,
     newestSince,
+    normalizeGoal,
     readCheckpoint,
     resolveLaneName,
     sanitizeLaneName,
@@ -332,5 +335,66 @@ describe('newestSince', () => {
         });
         archiveCheckpoint(listActive(CWD, CHECKPOINT_DIR)[0]!, 'superseded', CWD, CHECKPOINT_DIR, { discard_reason: 'wrong track' });
         expect(newestSince(CWD, CHECKPOINT_DIR, since, SID)).toBeNull();
+    });
+});
+
+describe('goalSection / normalizeGoal', () => {
+    test('extracts the whole Goal section, not just its first line', () => {
+        const body = '## Goal\nShip the thing.\nUser said: "no ETAs".\n\n## Status\n- step 1\n';
+        expect(goalSection(body)).toBe('Ship the thing.\nUser said: "no ETAs".');
+    });
+
+    test('null when there is no Goal section; empty section is null too', () => {
+        expect(goalSection('## Status\n- x\n')).toBeNull();
+        expect(goalSection('## Goal\n\n## Status\n- x\n')).toBeNull();
+    });
+
+    test('normalizeGoal collapses whitespace so re-wrapping is not a change', () => {
+        expect(normalizeGoal('Ship  the\nthing. ')).toBe('Ship the thing.');
+        expect(normalizeGoal('Ship the thing.')).toBe(normalizeGoal('  Ship\n  the thing.\n'));
+    });
+});
+
+describe('laneGoalAnchor', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const now = Date.parse('2026-06-15T00:00:00.000Z');
+
+    test('null with no checkpoints, or none in this lane', () => {
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)).toBeNull();
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'other', created_at: '2026-06-14T00:00:00.000Z' }, body: '## Goal\nOther\n' });
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)).toBeNull();
+    });
+
+    test('the active checkpoint in the lane is the anchor', () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane', created_at: '2026-06-14T00:00:00.000Z' }, body: '## Goal\nA\n' });
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)?.body).toContain('A');
+    });
+
+    test('a resumed (archived) checkpoint is still the anchor — the post-compaction case', () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane', created_at: '2026-06-14T00:00:00.000Z' }, body: '## Goal\nA\n' });
+        archiveCheckpoint(listActive(CWD, CHECKPOINT_DIR)[0]!, 'resumed', CWD, CHECKPOINT_DIR, { resumed_at: '2026-06-14T01:00:00.000Z' });
+        expect(listActive(CWD, CHECKPOINT_DIR)).toHaveLength(0);
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)?.frontmatter.status).toBe('resumed');
+    });
+
+    test('superseded and stale checkpoints are never anchors; the newest eligible wins', () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane', created_at: '2026-06-13T00:00:00.000Z' }, body: '## Goal\nOld\n' });
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane', created_at: '2026-06-14T00:00:00.000Z' }, body: '## Goal\nNew\n' });
+        // First is now superseded in archive/; second is active.
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)?.body).toContain('New');
+        archiveCheckpoint(listActive(CWD, CHECKPOINT_DIR)[0]!, 'stale', CWD, CHECKPOINT_DIR);
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)).toBeNull();
+    });
+
+    test('older than maxAgeDays by created_at is ignored unless resumed recently', () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane', created_at: new Date(now - 30 * DAY).toISOString() }, body: '## Goal\nA\n' });
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)).toBeNull();
+        archiveCheckpoint(listActive(CWD, CHECKPOINT_DIR)[0]!, 'resumed', CWD, CHECKPOINT_DIR, { resumed_at: new Date(now - 1 * DAY).toISOString() });
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)?.body).toContain('A');
+    });
+
+    test('a checkpoint without a Goal section is not an anchor', () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane', created_at: '2026-06-14T00:00:00.000Z' }, body: '## Status\n- x\n' });
+        expect(laneGoalAnchor(CWD, CHECKPOINT_DIR, 'lane', 14, now)).toBeNull();
     });
 });

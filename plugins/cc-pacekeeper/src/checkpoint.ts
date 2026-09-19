@@ -19,6 +19,8 @@ export interface CheckpointFrontmatter {
     worktree?: string;
     files_touched?: string[];
     discard_reason?: string;
+    /** True when this save changed the lane's Goal with --goal-changed (see laneGoalAnchor). */
+    goal_changed?: boolean;
     resumed_at?: string;
     resumed_by_session?: string;
     /** ISO time the auto-loop scheduled a wake one-shot for (block reset + wake_delay_min). */
@@ -321,6 +323,46 @@ export function newestSince(
     return [...listLive(cwd, checkpointDirName), ...listArchive(cwd, checkpointDirName)]
         .filter(c => Number.isFinite(stamp(c)) && stamp(c) >= sinceMs
             && mine(c) && c.frontmatter.discard_reason === undefined)
+        .sort((a, b) => stamp(b) - stamp(a))[0] ?? null;
+}
+
+/** Full text of the `## Goal` section (trimmed), or null if absent or empty. */
+export function goalSection(body: string): string | null {
+    const m = /(^|\n)## Goal[ \t]*\n([\s\S]*?)(?=\n## |\n*$)/.exec(body);
+    const goal = (m?.[2] ?? '').trim();
+    return goal === '' ? null : goal;
+}
+
+/** Whitespace-insensitive form for comparing goals: re-wrapping is not a change. */
+export function normalizeGoal(goal: string): string {
+    return goal.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The lane's goal anchor: the newest checkpoint in `lane`, live or archived,
+ * whose status is active or resumed, that has a Goal section, and that was
+ * created or resumed within `maxAgeDays`. Superseded and stale ones never
+ * anchor (superseded = replaced by a newer save; stale = the lane went quiet).
+ * Recency counts resumed_at as well as created_at: an old checkpoint picked
+ * up today is today's goal. Null means the lane has no goal to carry forward.
+ */
+export function laneGoalAnchor(
+    cwd: string,
+    checkpointDirName: string,
+    lane: string,
+    maxAgeDays: number,
+    now: number = Date.now()
+): Checkpoint | null {
+    const stamp = (c: Checkpoint): number => Math.max(
+        Date.parse(c.frontmatter.created_at) || 0,
+        c.frontmatter.resumed_at ? (Date.parse(c.frontmatter.resumed_at) || 0) : 0
+    );
+    const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+    return [...listLive(cwd, checkpointDirName), ...listArchive(cwd, checkpointDirName)]
+        .filter(c => laneOf(c.frontmatter) === lane)
+        .filter(c => c.frontmatter.status === 'active' || c.frontmatter.status === 'resumed')
+        .filter(c => goalSection(c.body) !== null)
+        .filter(c => stamp(c) > 0 && now - stamp(c) <= maxAgeMs)
         .sort((a, b) => stamp(b) - stamp(a))[0] ?? null;
 }
 
