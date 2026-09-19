@@ -287,6 +287,27 @@ describe('parseWindowSetting / readAutoCompactSetting', () => {
         expect(parseWindowSetting(undefined)).toBeNull();
     });
 
+    // End to end: the settings file, not just the reader, moves the denominator.
+    test('resolveUsableContextWindow honors a settings.json autoCompactWindow', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-ctx-settings-e2e-'));
+        fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ autoCompactWindow: '300k' }));
+        const prevDir = process.env.CLAUDE_CONFIG_DIR;
+        const prevWindow = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+        const prevDisable1M = process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT;
+        process.env.CLAUDE_CONFIG_DIR = dir;
+        delete process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+        delete process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT;
+        try {
+            expect(resolveUsableContextWindow('claude-opus [1M]', 200_000)).toBe(300_000);
+        } finally {
+            if (prevDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+            else process.env.CLAUDE_CONFIG_DIR = prevDir;
+            if (prevWindow !== undefined) process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = prevWindow;
+            if (prevDisable1M !== undefined) process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT = prevDisable1M;
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test('reads autoCompactWindow from settings.json under CLAUDE_CONFIG_DIR', () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-ctx-settings-'));
         fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ autoCompactWindow: '300k' }));

@@ -138,6 +138,21 @@ describe('buildPostCompactContext', () => {
         expect(out).toContain(CHECKPOINT_DIR);
     });
 
+    test('a long handoff list eats into the body budget, not into the 10K ceiling', () => {
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'lane', created_at: '2026-06-01T01:00:00.000Z' },
+            body: '## Goal\n' + 'x'.repeat(POST_COMPACT_BODY_CAP + 500)
+        });
+        for (let i = 0; i < 20; i++) {
+            writeHandoff({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, agentId: `agent-${i}`, agentType: 'general-purpose', trigger: 'budget_pause', body: '## Goal\nsub\n' });
+        }
+        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, SID);
+        expect(out.length).toBeLessThan(POST_COMPACT_BODY_CAP + 1000);
+        expect(out).toContain('truncated');
+        expect(out).toContain('agent-19');
+    });
+
     test('a concurrent session\'s checkpoint is not presented as this session\'s record', () => {
         saveCheckpoint({
             cwd: CWD, checkpointDirName: CHECKPOINT_DIR,

@@ -806,12 +806,16 @@ export function buildPostCompactContext(
 ): string {
     const ckpt = newestSince(cwd, checkpointDirName, sessionStartedAt, sessionId);
     const handoffs = listHandoffs(cwd, checkpointDirName);
+    const handoffLines = formatHandoffLines(handoffs, checkpointDirName);
+    // Claude Code's 10K ceiling applies to the WHOLE additionalContext string,
+    // not to the body alone, so a long handoff list eats into the body budget.
+    const bodyCap = Math.max(1000, POST_COMPACT_BODY_CAP - handoffLines.join('\n').length);
     const lines: string[] = [];
     if (ckpt) {
         const relPath = ckpt.path.startsWith(cwd) ? ckpt.path.slice(cwd.length + 1) : ckpt.path;
         let body = ckpt.body;
-        if (body.length > POST_COMPACT_BODY_CAP) {
-            body = `${body.slice(0, POST_COMPACT_BODY_CAP)}\n\n[… truncated; full text in ${relPath}]`;
+        if (body.length > bodyCap) {
+            body = `${body.slice(0, bodyCap)}\n\n[… truncated; full text in ${relPath}]`;
         }
         lines.push(
             `🔁 Context was just compacted. The summary above is lossy; this is the checkpoint saved this session (lane ${laneOf(ckpt.frontmatter)}, ${agoLabel(ckpt.frontmatter.created_at, nowMs)}, ${relPath}):`,
@@ -825,7 +829,6 @@ export function buildPostCompactContext(
             '🔁 Context was just compacted and no checkpoint was saved this session, so the summary above is the only record of the goal. Before continuing, restate the goal, its constraints and the next step in three lines, then save a checkpoint via /cc-pacekeeper:checkpoint save at the next natural break.'
         );
     }
-    const handoffLines = formatHandoffLines(handoffs, checkpointDirName);
     if (handoffLines.length > 0) lines.push('', ...handoffLines);
     return lines.join('\n');
 }

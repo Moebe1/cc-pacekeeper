@@ -433,6 +433,23 @@ describe('SessionStart(compact) re-orientation', () => {
         expect(ctx).not.toMatch(/ctx (8|9)\d%/);
     });
 
+    test('a compact start does not ask the one-time channel onboarding question', () => {
+        fs.mkdirSync(path.join(HOME, '.config', 'cc-pacekeeper'), { recursive: true });
+        fs.writeFileSync(
+            path.join(HOME, '.config', 'cc-pacekeeper', 'config.json'),
+            JSON.stringify({ channels: { preferred: [], target: '', asked: false } })
+        );
+        const sid = newSid();
+        writeUsage(40);
+        const transcript = writeCompactedTranscript();
+        runTick({ session_id: sid, hook_event_name: 'UserPromptSubmit', prompt: 'hi', transcript_path: transcript });
+        const compact = runTick({ session_id: sid, hook_event_name: 'SessionStart', source: 'compact', transcript_path: transcript });
+        expect(compact).not.toContain('No away-channel is configured');
+        // The same state on a real startup still asks — this is a compact-only gate.
+        const startup = runTick({ session_id: newSid(), hook_event_name: 'SessionStart', source: 'startup' });
+        expect(startup).toContain('No away-channel is configured');
+    });
+
     test('a normal startup still gets the pointer banner, not the body', () => {
         const sid = newSid();
         writeUsage(40);
