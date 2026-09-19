@@ -357,6 +357,35 @@ describe('newestSince', () => {
         expect(found!.body).toContain('Blank-stamped');
     });
 
+    // `claude --continue` can hand the Bash tool the startup id while the hooks
+    // see the resumed one, so a stamp mismatch must never leave a session with
+    // nothing to re-orient from — the concurrent-session guard only decides
+    // WHICH candidate wins when this session has one of its own.
+    test('falls back to the newest candidate when no stamp matches this session', () => {
+        const since = Date.parse('2026-06-01T00:00:00.000Z');
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'lane', created_at: '2026-06-01T01:00:00.000Z', session_id: 'other' },
+            body: '## Goal\nOnly candidate\n'
+        });
+        expect(newestSince(CWD, CHECKPOINT_DIR, since, SID)!.body).toContain('Only candidate');
+    });
+
+    test('prefers this session\'s stamped save over a newer one from another session', () => {
+        const since = Date.parse('2026-06-01T00:00:00.000Z');
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'mine', created_at: '2026-06-01T01:00:00.000Z', session_id: SID },
+            body: '## Goal\nMine\n'
+        });
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'theirs', created_at: '2026-06-01T02:00:00.000Z', session_id: 'other' },
+            body: '## Goal\nTheirs\n'
+        });
+        expect(newestSince(CWD, CHECKPOINT_DIR, since, SID)!.body).toContain('Mine');
+    });
+
     test('skips a checkpoint the user explicitly discarded', () => {
         const since = Date.parse('2026-06-01T00:00:00.000Z');
         saveCheckpoint({

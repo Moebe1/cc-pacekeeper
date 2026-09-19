@@ -185,7 +185,7 @@ export async function runDoctor(opts: { network?: boolean; transcript?: string }
             const t = transcriptPathForSession(sid);
             checks.push(t
                 ? { name: 'session env', severity: 'ok', detail: `CLAUDE_CODE_SESSION_ID=${sid}; transcript ${t}` }
-                : { name: 'session env', severity: 'warn', detail: `CLAUDE_CODE_SESSION_ID=${sid} but no transcript found under ${getClaudeConfigDir()}/projects — context meter will be absent from checkpoints` });
+                : { name: 'session env', severity: 'warn', detail: `CLAUDE_CODE_SESSION_ID=${sid} but no transcript found under ${getClaudeConfigDir()}/projects — context meter will be absent from checkpoints, and the id is not stamped (on \`--continue\`/\`--resume\` without an explicit id this variable can be the startup id rather than the resumed one)` });
         }
     }
 

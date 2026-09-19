@@ -65,7 +65,18 @@ describe('resume by lane name / index', () => {
     test('resumes by numeric index and records resumed_by_session', () => {
         saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane-a' }, body: '## Goal\nA\n' });
 
-        captureStdout(() => verbResume(parseArgs(['resume', '1', '--session-id', 'sess-123']), CWD, cfg));
+        // Only an id with a transcript is recorded, so give it one.
+        const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-cfg-'));
+        fs.mkdirSync(path.join(cfgDir, 'projects', '-p'), { recursive: true });
+        fs.writeFileSync(path.join(cfgDir, 'projects', '-p', 'sess-123.jsonl'), '{}\n');
+        const prev = process.env.CLAUDE_CONFIG_DIR;
+        process.env.CLAUDE_CONFIG_DIR = cfgDir;
+        try {
+            captureStdout(() => verbResume(parseArgs(['resume', '1', '--session-id', 'sess-123']), CWD, cfg));
+        } finally {
+            if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prev;
+            fs.rmSync(cfgDir, { recursive: true, force: true });
+        }
 
         const archived = listArchive(CWD, CHECKPOINT_DIR);
         expect(archived[0]?.frontmatter.resumed_by_session).toBe('sess-123');
@@ -311,6 +322,21 @@ describe('save: goal lock', () => {
         await save(['--name', 'lane', '--session-id', '', '--body-file', bodyFile('## Goal\nDo it\n')]);
         const active = listActive(CWD, CHECKPOINT_DIR)[0]!;
         expect(readCheckpoint(active.path)!.frontmatter.session_id).toBeUndefined();
+    });
+
+    // A `--continue` startup id has no transcript of its own; stamping it would
+    // tie the file to a session id no hook will ever present.
+    test('a --session-id whose transcript cannot be found is not stamped', async () => {
+        const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-cfg-'));
+        const prev = process.env.CLAUDE_CONFIG_DIR;
+        process.env.CLAUDE_CONFIG_DIR = cfgDir;
+        try {
+            await save(['--name', 'lane', '--session-id', 'sid-x', '--body-file', bodyFile('## Goal\nG\n')]);
+        } finally {
+            if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prev;
+            fs.rmSync(cfgDir, { recursive: true, force: true });
+        }
+        expect(listActive(CWD, CHECKPOINT_DIR)[0]!.frontmatter.session_id).toBeUndefined();
     });
 
     test('with --session-id and no --transcript-path, meters.context_pct is captured from the session transcript', async () => {

@@ -335,10 +335,14 @@ export function newestSince(
         const sid = c.frontmatter.session_id;
         return typeof sid !== 'string' || sid === '' || sid === sessionId;
     };
-    return [...listLive(cwd, checkpointDirName), ...listArchive(cwd, checkpointDirName)]
-        .filter(c => stamp(c) > 0 && stamp(c) >= sinceMs
-            && mine(c) && c.frontmatter.discard_reason === undefined)
-        .sort((a, b) => stamp(b) - stamp(a))[0] ?? null;
+    const candidates = [...listLive(cwd, checkpointDirName), ...listArchive(cwd, checkpointDirName)]
+        .filter(c => stamp(c) > 0 && stamp(c) >= sinceMs && c.frontmatter.discard_reason === undefined)
+        .sort((a, b) => stamp(b) - stamp(a));
+    // This session's own save wins; with none, the newest candidate is still
+    // better than nothing — `claude --continue` can hand the Bash tool the
+    // startup id while the hooks report the resumed one, and a stamp mismatch
+    // must not cost the session its orientation.
+    return candidates.find(mine) ?? candidates[0] ?? null;
 }
 
 /** Full text of the `## Goal` section (trimmed), or null if absent or empty. */

@@ -153,14 +153,22 @@ describe('buildPostCompactContext', () => {
         expect(out).toContain('agent-19');
     });
 
-    test('a concurrent session\'s checkpoint is not presented as this session\'s record', () => {
+    // With a save of our own, a concurrent session's newer one must not win.
+    // (With none of our own it is still injected — a stamp mismatch is more
+    // often `--continue` handing Bash the startup id than a second session.)
+    test('a concurrent session\'s newer checkpoint does not displace this session\'s', () => {
         saveCheckpoint({
             cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
-            frontmatter: { name: 'lane', created_at: '2026-06-01T01:00:00.000Z', session_id: 'sess-2' },
+            frontmatter: { name: 'mine', created_at: '2026-06-01T01:00:00.000Z', session_id: SID },
+            body: '## Goal\nShip the thing\n'
+        });
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'theirs', created_at: '2026-06-01T02:00:00.000Z', session_id: 'sess-2' },
             body: '## Goal\nRefactor auth\n'
         });
         const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, SID);
-        expect(out).toContain('no checkpoint was saved this session');
+        expect(out).toContain('Ship the thing');
         expect(out).not.toContain('Refactor auth');
     });
 

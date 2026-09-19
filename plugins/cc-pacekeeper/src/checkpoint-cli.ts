@@ -125,16 +125,25 @@ function gatherMeters(transcriptPath: string | undefined, configWindowSize: numb
     return meters;
 }
 
+/** The --session-id flag, or undefined when absent or expanded to nothing. */
+function sessionIdFlagOf(args: Args): string | undefined {
+    const raw = args.flags['session-id'];
+    return typeof raw === 'string' && raw.trim() !== '' ? raw : undefined;
+}
+
 export function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadConfig>): Promise<void> | void {
     const bodyFromFlag = typeof args.flags.body === 'string' ? args.flags.body : null;
     const bodyFromFile = typeof args.flags['body-file'] === 'string' ? fs.readFileSync(args.flags['body-file'] as string, 'utf8') : null;
     const trigger = (typeof args.flags.trigger === 'string' ? args.flags.trigger : 'user_invoked');
-    const sessionIdFlag = args.flags['session-id'];
-    // A session-id flag that expanded to nothing arrives as '': absent, not a blank stamp.
-    const sessionId = typeof sessionIdFlag === 'string' && sessionIdFlag.trim() !== '' ? sessionIdFlag : undefined;
-    const transcriptFlag = typeof args.flags['transcript-path'] === 'string' ? args.flags['transcript-path'] : undefined;
+    const sidFlag = sessionIdFlagOf(args);
     // The Bash tool exports the session id but no transcript path; derive it.
-    const transcriptPath = transcriptFlag ?? (sessionId ? transcriptPathForSession(sessionId) : undefined);
+    const sessionTranscript = sidFlag ? transcriptPathForSession(sidFlag) : undefined;
+    // Stamp the id only when it has a transcript: `claude --continue` can hand
+    // the Bash tool the startup id rather than the resumed one, and a stamp no
+    // hook will ever match is worse than none.
+    const sessionId = sessionTranscript ? sidFlag : undefined;
+    const transcriptFlag = typeof args.flags['transcript-path'] === 'string' ? args.flags['transcript-path'] : undefined;
+    const transcriptPath = transcriptFlag ?? sessionTranscript;
     const name = typeof args.flags.name === 'string' ? args.flags.name : undefined;
     const wakeAt = typeof args.flags['wake-at'] === 'string' ? args.flags['wake-at'] : undefined;
     const wakePrompt = typeof args.flags['wake-prompt'] === 'string' ? args.flags['wake-prompt'] : undefined;
@@ -359,9 +368,10 @@ export function verbResume(args: Args, cwd: string, cfg: ReturnType<typeof loadC
 
     printOrientation(ckpt);
 
-    const sessionIdFlag = args.flags['session-id'];
-    // A session-id flag that expanded to nothing arrives as '': absent, not a blank stamp.
-    const sessionId = typeof sessionIdFlag === 'string' && sessionIdFlag.trim() !== '' ? sessionIdFlag : undefined;
+    // Same rule as `save`: record the resuming session only when its id is the
+    // one with a transcript (see verbSave).
+    const sidFlag = sessionIdFlagOf(args);
+    const sessionId = sidFlag && transcriptPathForSession(sidFlag) ? sidFlag : undefined;
     const moved = archiveCheckpoint(ckpt, 'resumed', cwd, cfg.checkpoint_dir_name, {
         resumed_at: new Date().toISOString(),
         ...(sessionId ? { resumed_by_session: sessionId } : {})
