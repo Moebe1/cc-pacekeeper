@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { configDir, configFile, configValidationIssues, loadConfig } from './config';
 import { crashLogFile, readCrashLog } from './crash-log';
-import { readContextTokens, readMostRecentModel } from './ctx-tokens';
+import { autoCompactWindow, readContextTokens, readMostRecentModel } from './ctx-tokens';
 import { MODEL_INFO_CACHE_FILE, resolveModelInfoAuth } from './model-info';
 import { fuse, probeAll } from './presence';
 import { stateDir } from './state';
@@ -88,6 +88,15 @@ export async function runDoctor(opts: { network?: boolean; transcript?: string }
     checks.push(cfg.context_window_size !== DEFAULT_CONTEXT_WINDOW_SIZE
         ? { name: 'context window override', severity: 'warn', detail: `context_window_size=${cfg.context_window_size} overrides EVERY model's fetched window — ctx% is wrong for models with a different window. Remove it from ${configFile()} unless intentional. (The default ${DEFAULT_CONTEXT_WINDOW_SIZE} means "no override".)` }
         : { name: 'context window override', severity: 'ok', detail: 'none — per-model windows from the API apply' });
+
+    // 5b. Auto-compact window: the ctx% denominator follows Claude Code's own
+    // compaction point, so an override here moves where "100%" sits.
+    {
+        const probe = autoCompactWindow(1_000_000);
+        checks.push(probe.source === 'model-default'
+            ? { name: 'auto-compact window', severity: 'ok', detail: 'no override — 1M-window models compact at ~967K tokens, others at their full window; ctx% is relative to that' }
+            : { name: 'auto-compact window', severity: 'ok', detail: `${probe.tokens} tokens from ${probe.source === 'env' ? 'CLAUDE_CODE_AUTO_COMPACT_WINDOW' : 'settings.json autoCompactWindow'} — ctx% is relative to this` });
+    }
 
     // 6. Model-info cache.
     try {

@@ -166,10 +166,10 @@ describe('auto-loop (main thread)', () => {
 });
 
 describe('ctx auto-save crossing re-arm [G4]', () => {
-    // usable window = 200k * 0.8 = 160k; critical at 90% = 144k.
+    // denominator = the 200k auto-compact point; critical at 90% = 180k.
     test('fires at critical, stays quiet while armed, re-fires after dipping below warn', () => {
         const sid = newSid();
-        const transcript = writeTranscript(150_000); // ~94% — critical
+        const transcript = writeTranscript(190_000); // ~95% — critical
 
         const first = runTick({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript });
         expect(first).toContain('Context window at critical');
@@ -179,11 +179,11 @@ describe('ctx auto-save crossing re-arm [G4]', () => {
         expect(second).not.toContain('Context window at critical');
 
         // Compaction happened: ctx drops below warn → disarm.
-        writeTranscript(50_000); // ~31%
+        writeTranscript(50_000); // ~25%
         runTick({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript });
 
         // Climb again → re-fire.
-        writeTranscript(150_000);
+        writeTranscript(190_000);
         const fourth = runTick({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript });
         expect(fourth).toContain('Context window at critical');
     });
@@ -191,7 +191,7 @@ describe('ctx auto-save crossing re-arm [G4]', () => {
     test('combined 5h+ctx: single auto-loop directive covers both, ctx directive suppressed', () => {
         writeUsage(86, 10 * 60_000);
         const sid = newSid();
-        const transcript = writeTranscript(150_000);
+        const transcript = writeTranscript(190_000);
         const out = runTick({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript });
         expect(out).toContain('auto-renewal');
         expect(out).toContain('context also critical — one save covers both');
