@@ -10,6 +10,16 @@ The context meter now follows Claude Code's own compaction point — including t
 hold under `CLAUDE_CODE_DISABLE_1M_CONTEXT` — and an in-session compaction re-orients
 Claude from the checkpoint it saved.
 
+### Added
+
+- **Goal lock.** `save` carries a lane's `## Goal` forward verbatim: a save whose Goal
+  differs from the lane's current goal (its newest active-or-resumed checkpoint within
+  `checkpoint.stale_after_days`) is refused with both goals printed, unless
+  `--goal-changed` is passed, in which case the file records `goal_changed: true` and
+  `list` shows it. Observed live: 15 saves in one lane over 16 hours rewrote the Goal
+  five times and accreted progress notes into it — each rewrite authored from a summary
+  plus the previous checkpoint. Legacy bodies without a Goal section are never refused.
+
 ### Fixed
 
 - **ctx% was ~20% high on 1M-window models.** The denominator was ccstatusline's
