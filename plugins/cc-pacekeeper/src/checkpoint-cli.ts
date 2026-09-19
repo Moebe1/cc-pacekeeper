@@ -21,7 +21,7 @@ import {
 } from './checkpoint';
 import { contextPercent, readContextTokens, resolveUsableContextWindow } from './ctx-tokens';
 import { readUsageCacheFile } from './vendor/usage-fetch';
-import { projectRootFromTranscript, resolveProjectRoot, worktreeInfo } from './resolve-root';
+import { projectRootFromTranscript, resolveProjectRoot, transcriptPathForSession, worktreeInfo } from './resolve-root';
 import { archiveHandoff, listHandoffs, writeHandoff } from './agent-budget';
 import { formatDoctorReport, runDoctor } from './doctor';
 
@@ -130,9 +130,11 @@ export function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadCon
     const bodyFromFile = typeof args.flags['body-file'] === 'string' ? fs.readFileSync(args.flags['body-file'] as string, 'utf8') : null;
     const trigger = (typeof args.flags.trigger === 'string' ? args.flags.trigger : 'user_invoked');
     const sessionIdFlag = args.flags['session-id'];
-    // An unset $CLAUDE_SESSION_ID arrives as '': absent, not a blank stamp.
+    // A session-id flag that expanded to nothing arrives as '': absent, not a blank stamp.
     const sessionId = typeof sessionIdFlag === 'string' && sessionIdFlag.trim() !== '' ? sessionIdFlag : undefined;
-    const transcriptPath = typeof args.flags['transcript-path'] === 'string' ? args.flags['transcript-path'] : undefined;
+    const transcriptFlag = typeof args.flags['transcript-path'] === 'string' ? args.flags['transcript-path'] : undefined;
+    // The Bash tool exports the session id but no transcript path; derive it.
+    const transcriptPath = transcriptFlag ?? (sessionId ? transcriptPathForSession(sessionId) : undefined);
     const name = typeof args.flags.name === 'string' ? args.flags.name : undefined;
     const wakeAt = typeof args.flags['wake-at'] === 'string' ? args.flags['wake-at'] : undefined;
     const wakePrompt = typeof args.flags['wake-prompt'] === 'string' ? args.flags['wake-prompt'] : undefined;
@@ -358,7 +360,7 @@ export function verbResume(args: Args, cwd: string, cfg: ReturnType<typeof loadC
     printOrientation(ckpt);
 
     const sessionIdFlag = args.flags['session-id'];
-    // An unset $CLAUDE_SESSION_ID arrives as '': absent, not a blank stamp.
+    // A session-id flag that expanded to nothing arrives as '': absent, not a blank stamp.
     const sessionId = typeof sessionIdFlag === 'string' && sessionIdFlag.trim() !== '' ? sessionIdFlag : undefined;
     const moved = archiveCheckpoint(ckpt, 'resumed', cwd, cfg.checkpoint_dir_name, {
         resumed_at: new Date().toISOString(),
@@ -507,7 +509,7 @@ function verbHelp(): void {
         'Usage: pacekeeper-checkpoint <verb> [args]',
         '',
         'All verbs accept --cwd <path> to pin the project root explicitly. When',
-        'omitted, the root is resolved from --transcript-path, then the git repo',
+        'omitted, the root is resolved from --transcript-path (or the transcript found via --session-id), then the git repo',
         'root, then the process cwd; transient dirs (/tmp, $HOME, /) are refused.',
         '',
         'Checkpoints are organized into named "lanes" — parallel active checkpoints',

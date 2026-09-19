@@ -24,6 +24,12 @@ Claude from the checkpoint it saved.
 
 ### Fixed
 
+- **Checkpoints were saved without a session id or context meter.** The skill named
+  `$CLAUDE_SESSION_ID` and `$CLAUDE_TRANSCRIPT_PATH`, neither of which exists in the
+  Bash tool (every checkpoint on disk had `session_id:` blank and no `context_pct`).
+  The skill now passes `CLAUDE_CODE_SESSION_ID`, which Claude Code does export, and
+  `save` finds the transcript from the id. `doctor` reports whether the id is visible.
+- **Frontmatter parser: an empty scalar (`session_id:`) now reads as `''`, not `{}`.**
 - **ctx% was ~20% high on 1M-window models.** The denominator was ccstatusline's
   0.8 × window; Claude Code compacts 1M-window models at ~967K and other models at
   their full window (`CLAUDE_CODE_AUTO_COMPACT_WINDOW` / the `autoCompactWindow`

@@ -5,6 +5,7 @@ import { crashLogFile, readCrashLog } from './crash-log';
 import { autoCompactWindow, readContextTokens, readMostRecentModel } from './ctx-tokens';
 import { MODEL_INFO_CACHE_FILE, resolveModelInfoAuth } from './model-info';
 import { fuse, probeAll } from './presence';
+import { transcriptPathForSession } from './resolve-root';
 import { stateDir } from './state';
 import { USAGE_ERROR_HINTS } from './thresholds';
 import { getClaudeConfigDir } from './vendor/claude-config-dir';
@@ -171,6 +172,21 @@ export async function runDoctor(opts: { network?: boolean; transcript?: string }
         }
     } catch {
         checks.push({ name: 'plugin version', severity: 'ok', detail: 'no installed-plugins record readable (dev checkout or non-standard install)' });
+    }
+
+    // 12. Session id visibility. The checkpoint CLI stamps session_id and finds
+    // the transcript from CLAUDE_CODE_SESSION_ID, which Claude Code exports to
+    // the Bash tool. Outside a session it is absent, which is expected.
+    {
+        const sid = process.env.CLAUDE_CODE_SESSION_ID?.trim();
+        if (!sid) {
+            checks.push({ name: 'session env', severity: 'warn', detail: 'CLAUDE_CODE_SESSION_ID not set — expected outside a Claude Code session; inside one, checkpoints would be saved without a session id or live context meter' });
+        } else {
+            const t = transcriptPathForSession(sid);
+            checks.push(t
+                ? { name: 'session env', severity: 'ok', detail: `CLAUDE_CODE_SESSION_ID=${sid}; transcript ${t}` }
+                : { name: 'session env', severity: 'warn', detail: `CLAUDE_CODE_SESSION_ID=${sid} but no transcript found under ${getClaudeConfigDir()}/projects — context meter will be absent from checkpoints` });
+        }
     }
 
     return checks;

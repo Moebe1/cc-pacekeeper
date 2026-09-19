@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { isUnsafeRoot, projectRootFromTranscript, resolveProjectRoot, worktreeInfo } from '../resolve-root';
+import { isUnsafeRoot, projectRootFromTranscript, resolveProjectRoot, transcriptPathForSession, worktreeInfo } from '../resolve-root';
 
 // Fixtures must live OUTSIDE the tmp roots and $HOME, since resolveProjectRoot
 // refuses those. We stage them under the test file's own directory tree.
@@ -176,5 +176,23 @@ describe('worktreeInfo', () => {
         // Use the filesystem root's parent-less sentinel: a path with no repo
         // above it. os.tmpdir() is not under a git repo on CI/dev machines.
         expect(worktreeInfo(os.tmpdir())).toBeUndefined();
+    });
+});
+
+describe('transcriptPathForSession', () => {
+    test('finds <configDir>/projects/*/<sid>.jsonl, newest mtime first; undefined when absent', () => {
+        const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-cfg-'));
+        expect(transcriptPathForSession('sid-1', cfgDir)).toBeUndefined();
+        const a = path.join(cfgDir, 'projects', '-Users-x-a');
+        const b = path.join(cfgDir, 'projects', '-Users-x-b');
+        fs.mkdirSync(a, { recursive: true });
+        fs.mkdirSync(b, { recursive: true });
+        fs.writeFileSync(path.join(a, 'sid-1.jsonl'), '{}\n');
+        fs.writeFileSync(path.join(b, 'sid-1.jsonl'), '{}\n');
+        const old = new Date(Date.now() - 60_000);
+        fs.utimesSync(path.join(a, 'sid-1.jsonl'), old, old);
+        expect(transcriptPathForSession('sid-1', cfgDir)).toBe(path.join(b, 'sid-1.jsonl'));
+        expect(transcriptPathForSession('other', cfgDir)).toBeUndefined();
+        fs.rmSync(cfgDir, { recursive: true, force: true });
     });
 });

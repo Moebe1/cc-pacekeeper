@@ -49,7 +49,7 @@ In a Claude Code session, you (Claude) compose the body from the current convers
 
 **The Goal section is locked per lane.** On the first save in a lane, write the user's request in their own words, quoted verbatim, plus at most one line of scope. On every later save in the same lane, copy the lane's Goal **verbatim** — do not paraphrase, shorten, or add progress notes, ETAs, or user quotes to it; those go under Status. The CLI refuses a save whose Goal differs from the lane's current goal (exit 2, both goals printed). Pass `--goal-changed` only when the user explicitly redirected the work in this session; the checkpoint then records `goal_changed: true` and `list` shows it. Never pass the flag to make an error go away.
 
-**Always pass `--transcript-path $CLAUDE_TRANSCRIPT_PATH`** (and `--session-id $CLAUDE_SESSION_ID`) when available: frontmatter captures live meter readings, and the CLI uses the transcript to anchor the checkpoint to the project root. <!-- Anchoring: transcript cwd → --cwd → git root → process cwd; refuses transient dirs so the file lands where git can track it. -->
+**Always pass `--session-id "$CLAUDE_CODE_SESSION_ID"`** (Claude Code exports it to the Bash tool; it matches the hook's `session_id`). The CLI finds the session transcript from that id, so frontmatter captures live meter readings and the checkpoint is anchored to the project root; `--transcript-path <path>` is only needed to override that. <!-- Anchoring: transcript cwd → --cwd → git root → process cwd; refuses transient dirs so the file lands where git can track it. -->
 
 > **Anchoring is internal mechanics — never mention `/tmp`, root resolution, or anchoring to the user. Just save and report the saved checkpoint path.**
 

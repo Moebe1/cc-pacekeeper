@@ -305,11 +305,34 @@ describe('save: goal lock', () => {
         expect(legacy.code).toBeUndefined();
     });
 
-    // `--session-id "$CLAUDE_SESSION_ID"` with the variable unset arrives as an
-    // empty string; stamping it writes a blank key the parser cannot read back.
+    // A session-id flag whose variable expanded to nothing arrives as an empty
+    // string; stamping it would write a blank key that means nothing.
     test('an empty --session-id is treated as absent, not stamped blank', async () => {
         await save(['--name', 'lane', '--session-id', '', '--body-file', bodyFile('## Goal\nDo it\n')]);
         const active = listActive(CWD, CHECKPOINT_DIR)[0]!;
         expect(readCheckpoint(active.path)!.frontmatter.session_id).toBeUndefined();
+    });
+
+    test('with --session-id and no --transcript-path, meters.context_pct is captured from the session transcript', async () => {
+        const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-cfg-'));
+        const proj = path.join(cfgDir, 'projects', '-Users-x-proj');
+        fs.mkdirSync(proj, { recursive: true });
+        fs.writeFileSync(path.join(proj, 'sid-9.jsonl'), JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 50_000 } } }) + '\n');
+        const prev = process.env.CLAUDE_CONFIG_DIR;
+        // 50_000 / 200_000 = 25%, as long as the developer's own window
+        // overrides stay out of it.
+        const prevWindow = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+        process.env.CLAUDE_CONFIG_DIR = cfgDir;
+        delete process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+        try {
+            await save(['--name', 'lane', '--session-id', 'sid-9', '--body-file', bodyFile('## Goal\nG\n')]);
+        } finally {
+            if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prev;
+            if (prevWindow !== undefined) process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = prevWindow;
+        }
+        const saved = listActive(CWD, CHECKPOINT_DIR)[0]!;
+        expect(saved.frontmatter.session_id).toBe('sid-9');
+        expect((saved.frontmatter.meters as Record<string, unknown>).context_pct).toBe(25);
+        fs.rmSync(cfgDir, { recursive: true, force: true });
     });
 });
