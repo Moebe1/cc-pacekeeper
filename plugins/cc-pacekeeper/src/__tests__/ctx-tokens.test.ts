@@ -169,10 +169,13 @@ function isolateAutoCompactEnv(): void {
     let dir: string;
     let prevWindow: string | undefined;
     let prevConfigDir: string | undefined;
+    let prevDisable1M: string | undefined;
     beforeEach(() => {
         prevWindow = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
         prevConfigDir = process.env.CLAUDE_CONFIG_DIR;
+        prevDisable1M = process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT;
         delete process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+        delete process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT;
         dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-ctx-env-'));
         process.env.CLAUDE_CONFIG_DIR = dir;
     });
@@ -181,6 +184,8 @@ function isolateAutoCompactEnv(): void {
         else process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = prevWindow;
         if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
         else process.env.CLAUDE_CONFIG_DIR = prevConfigDir;
+        if (prevDisable1M === undefined) delete process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT;
+        else process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT = prevDisable1M;
         fs.rmSync(dir, { recursive: true, force: true });
     });
 }
@@ -203,6 +208,19 @@ describe('resolveUsableContextWindow', () => {
 
     test('ignores a config override equal to the historical default (200k)', () => {
         expect(resolveUsableContextWindow('claude-opus [1M]', 200_000)).toBe(ONE_M_AUTOCOMPACT_TOKENS);
+    });
+
+    // Docs, model-config: with this set, models with a native 1M window are
+    // held at — and compact at — the 200K boundary.
+    test('CLAUDE_CODE_DISABLE_1M_CONTEXT=1 holds a 1M model at the 200k boundary', () => {
+        const prev = process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT;
+        process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT = '1';
+        try {
+            expect(resolveUsableContextWindow('claude-opus [1M]', 200_000)).toBe(200_000);
+        } finally {
+            if (prev === undefined) delete process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT;
+            else process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT = prev;
+        }
     });
 
     test('CLAUDE_CODE_AUTO_COMPACT_WINDOW in the environment wins', () => {

@@ -220,6 +220,14 @@ export function autoCompactWindow(
  * sentinel "no override" so existing configs don't silently cap modern models.
  */
 function resolveMaxTokens(model?: string, configOverride?: number): number {
+    const max = resolveRawMaxTokens(model, configOverride);
+    // Docs, model-config: with CLAUDE_CODE_DISABLE_1M_CONTEXT=1, models with a
+    // native 1M window are held at the 200K boundary and compact there.
+    if (process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT === '1') return Math.min(max, 200_000);
+    return max;
+}
+
+function resolveRawMaxTokens(model?: string, configOverride?: number): number {
     if (configOverride !== undefined && configOverride !== DEFAULT_CONTEXT_WINDOW_SIZE) {
         return getContextConfig(undefined, configOverride).maxTokens;
     }

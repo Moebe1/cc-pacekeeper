@@ -93,9 +93,10 @@ export async function runDoctor(opts: { network?: boolean; transcript?: string }
     // compaction point, so an override here moves where "100%" sits.
     {
         const probe = autoCompactWindow(1_000_000);
+        const cannotDetect = ' If this model actually runs at 200K (Bedrock/Vertex, or no 1M entitlement) set context_window_size in the plugin config or CLAUDE_CODE_DISABLE_1M_CONTEXT=1 — pacekeeper cannot detect that itself.';
         checks.push(probe.source === 'model-default'
-            ? { name: 'auto-compact window', severity: 'ok', detail: 'no override — 1M-window models compact at ~967K tokens, others at their full window; ctx% is relative to that' }
-            : { name: 'auto-compact window', severity: 'ok', detail: `${probe.tokens} tokens from ${probe.source === 'env' ? 'CLAUDE_CODE_AUTO_COMPACT_WINDOW' : 'settings.json autoCompactWindow'} — ctx% is relative to this` });
+            ? { name: 'auto-compact window', severity: 'ok', detail: `no override — 1M-window models compact at ~967K tokens, others at their full window; ctx% is relative to that.${cannotDetect}` }
+            : { name: 'auto-compact window', severity: 'ok', detail: `${probe.tokens} tokens from ${probe.source === 'env' ? 'CLAUDE_CODE_AUTO_COMPACT_WINDOW' : 'settings.json autoCompactWindow'} — ctx% is relative to this.${cannotDetect}` });
     }
 
     // 6. Model-info cache.
