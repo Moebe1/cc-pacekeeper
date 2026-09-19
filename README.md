@@ -12,7 +12,7 @@ ccstatusline shows usage to *you*. cc-pacekeeper injects those same numbers into
 
 Three meters tracked:
 
-- **Context window %** — current conversation token usage
+- **Context window %** — current conversation tokens as a fraction of Claude Code's auto-compact window (100% = compaction due)
 - **5-hour session block %** — Anthropic rolling window
 - **Weekly limits** — all-models, Sonnet-only, Opus-only
 
