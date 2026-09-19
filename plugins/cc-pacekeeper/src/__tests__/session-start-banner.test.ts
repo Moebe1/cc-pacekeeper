@@ -90,9 +90,10 @@ describe('buildResumeOrientation', () => {
 
 describe('buildPostCompactContext', () => {
     const since = Date.parse('2026-06-01T00:00:00.000Z');
+    const SID = 'sess-1';
 
     test('with no checkpoint this session, says so and asks for a restated goal', () => {
-        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since);
+        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, SID);
         expect(out).toContain('Context was just compacted');
         expect(out).toContain('no checkpoint was saved this session');
         expect(out).toContain('/cc-pacekeeper:checkpoint save');
@@ -103,7 +104,7 @@ describe('buildPostCompactContext', () => {
             cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
             frontmatter: { name: 'lane', created_at: '2026-01-01T00:00:00.000Z' }, body: '## Goal\nAncient\n'
         });
-        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since);
+        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, SID);
         expect(out).toContain('no checkpoint was saved this session');
         expect(out).not.toContain('Ancient');
     });
@@ -115,7 +116,7 @@ describe('buildPostCompactContext', () => {
             body: '## Goal\nShip the thing\n\n## Next\n1. Run the tests\n'
         });
         archiveCheckpoint(listActive(CWD, CHECKPOINT_DIR)[0]!, 'resumed', CWD, CHECKPOINT_DIR, {});
-        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, Date.parse('2026-06-01T03:00:00.000Z'));
+        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, SID, Date.parse('2026-06-01T03:00:00.000Z'));
         expect(out).toContain('Context was just compacted');
         expect(out).toContain('lane');
         expect(out).toContain('2h ago');
@@ -131,15 +132,26 @@ describe('buildPostCompactContext', () => {
             frontmatter: { name: 'lane', created_at: '2026-06-01T01:00:00.000Z' },
             body: '## Goal\n' + 'x'.repeat(POST_COMPACT_BODY_CAP + 500)
         });
-        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since);
+        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, SID);
         expect(out.length).toBeLessThan(POST_COMPACT_BODY_CAP + 1000);
         expect(out).toContain('truncated');
         expect(out).toContain(CHECKPOINT_DIR);
     });
 
+    test('a concurrent session\'s checkpoint is not presented as this session\'s record', () => {
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'lane', created_at: '2026-06-01T01:00:00.000Z', session_id: 'sess-2' },
+            body: '## Goal\nRefactor auth\n'
+        });
+        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, SID);
+        expect(out).toContain('no checkpoint was saved this session');
+        expect(out).not.toContain('Refactor auth');
+    });
+
     test('lists pending handoffs after the checkpoint', () => {
         writeHandoff({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, agentId: 'agent-42', agentType: 'general-purpose', trigger: 'budget_pause', body: '## Goal\nsub\n' });
-        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since);
+        const out = buildPostCompactContext(CWD, CHECKPOINT_DIR, since, SID);
         expect(out).toContain('paused subagent handoff');
         expect(out).toContain('agent-42');
     });

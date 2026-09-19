@@ -151,7 +151,7 @@ async function main(): Promise<void> {
         // After a compaction the summary is all Claude has; hand it this
         // session's checkpoint body instead of a pointer to run `resume`.
         sessionStartBlock = isCompactStart
-            ? buildPostCompactContext(cwd, cfg.checkpoint_dir_name, sessionEntry.sessionStartedAt, nowMs)
+            ? buildPostCompactContext(cwd, cfg.checkpoint_dir_name, sessionEntry.sessionStartedAt, sessionId, nowMs)
             : buildSessionStartContext(cwd, cfg.checkpoint_dir_name);
         // One-time channel onboarding. SessionStart, not Stop: Stop fires every
         // turn-end, so the question would repeat all session. Not on a compact
@@ -796,9 +796,10 @@ export function buildPostCompactContext(
     cwd: string,
     checkpointDirName: string,
     sessionStartedAt: number,
+    sessionId: string,
     nowMs: number = Date.now()
 ): string {
-    const ckpt = newestSince(cwd, checkpointDirName, sessionStartedAt);
+    const ckpt = newestSince(cwd, checkpointDirName, sessionStartedAt, sessionId);
     const handoffs = listHandoffs(cwd, checkpointDirName);
     const lines: string[] = [];
     if (ckpt) {

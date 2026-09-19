@@ -300,15 +300,27 @@ export function listActive(cwd: string, checkpointDirName: string): Checkpoint[]
 }
 
 /**
- * Newest checkpoint created at or after `sinceMs`, live or archived, any
- * status. Used to re-orient after an in-session compaction: a checkpoint that
- * was already resumed (archived) this session is still the best record of the
- * goal — status is about the registry, not about relevance.
+ * Newest checkpoint created at or after `sinceMs` BY `sessionId`, live or
+ * archived, any status. Used to re-orient after an in-session compaction: a
+ * checkpoint that was already resumed (archived) this session is still the
+ * best record of the goal — status is about the registry, not about
+ * relevance. A checkpoint stamped with another session's id is skipped
+ * (concurrent sessions share a project); one saved without `--session-id`
+ * cannot be attributed away, so it is kept. An explicitly discarded
+ * checkpoint is never "the record".
  */
-export function newestSince(cwd: string, checkpointDirName: string, sinceMs: number): Checkpoint | null {
+export function newestSince(
+    cwd: string,
+    checkpointDirName: string,
+    sinceMs: number,
+    sessionId: string
+): Checkpoint | null {
     const stamp = (c: Checkpoint): number => Date.parse(c.frontmatter.created_at);
+    const mine = (c: Checkpoint): boolean =>
+        c.frontmatter.session_id === undefined || c.frontmatter.session_id === sessionId;
     return [...listLive(cwd, checkpointDirName), ...listArchive(cwd, checkpointDirName)]
-        .filter(c => Number.isFinite(stamp(c)) && stamp(c) >= sinceMs)
+        .filter(c => Number.isFinite(stamp(c)) && stamp(c) >= sinceMs
+            && mine(c) && c.frontmatter.discard_reason === undefined)
         .sort((a, b) => stamp(b) - stamp(a))[0] ?? null;
 }
 

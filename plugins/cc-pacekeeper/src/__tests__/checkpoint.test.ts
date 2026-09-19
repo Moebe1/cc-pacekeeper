@@ -267,13 +267,15 @@ describe('frontmatter parser', () => {
 });
 
 describe('newestSince', () => {
+    const SID = 'sess-1';
+
     test('returns null with no checkpoints or only older ones', () => {
-        expect(newestSince(CWD, CHECKPOINT_DIR, Date.now())).toBeNull();
+        expect(newestSince(CWD, CHECKPOINT_DIR, Date.now(), SID)).toBeNull();
         saveCheckpoint({
             cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
             frontmatter: { name: 'old', created_at: '2026-01-01T00:00:00.000Z' }, body: '## Goal\nOld\n'
         });
-        expect(newestSince(CWD, CHECKPOINT_DIR, Date.parse('2026-06-01T00:00:00.000Z'))).toBeNull();
+        expect(newestSince(CWD, CHECKPOINT_DIR, Date.parse('2026-06-01T00:00:00.000Z'), SID)).toBeNull();
     });
 
     test('picks the newest by created_at across live and archive, any status', () => {
@@ -292,8 +294,43 @@ describe('newestSince', () => {
         archiveCheckpoint(active, 'resumed', CWD, CHECKPOINT_DIR, { resumed_at: '2026-06-01T02:05:00.000Z' });
         expect(listActive(CWD, CHECKPOINT_DIR)).toHaveLength(0);
 
-        const found = newestSince(CWD, CHECKPOINT_DIR, since)!;
+        const found = newestSince(CWD, CHECKPOINT_DIR, since, SID)!;
         expect(found.body).toContain('Second');
         expect(found.frontmatter.status).toBe('resumed');
+    });
+
+    test('skips another session\'s checkpoint but keeps an unstamped one', () => {
+        const since = Date.parse('2026-06-01T00:00:00.000Z');
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'mine', created_at: '2026-06-01T01:00:00.000Z', session_id: SID },
+            body: '## Goal\nMine\n'
+        });
+        // A concurrent session in the same project saves later — not "this session".
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'theirs', created_at: '2026-06-01T02:00:00.000Z', session_id: 'sess-2' },
+            body: '## Goal\nTheirs\n'
+        });
+        expect(newestSince(CWD, CHECKPOINT_DIR, since, SID)!.body).toContain('Mine');
+
+        // Saved without --session-id: kept, since it cannot be attributed away.
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'unstamped', created_at: '2026-06-01T03:00:00.000Z' },
+            body: '## Goal\nUnstamped\n'
+        });
+        expect(newestSince(CWD, CHECKPOINT_DIR, since, SID)!.body).toContain('Unstamped');
+    });
+
+    test('skips a checkpoint the user explicitly discarded', () => {
+        const since = Date.parse('2026-06-01T00:00:00.000Z');
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'lane', created_at: '2026-06-01T01:00:00.000Z', session_id: SID },
+            body: '## Goal\nDropped\n'
+        });
+        archiveCheckpoint(listActive(CWD, CHECKPOINT_DIR)[0]!, 'superseded', CWD, CHECKPOINT_DIR, { discard_reason: 'wrong track' });
+        expect(newestSince(CWD, CHECKPOINT_DIR, since, SID)).toBeNull();
     });
 });
