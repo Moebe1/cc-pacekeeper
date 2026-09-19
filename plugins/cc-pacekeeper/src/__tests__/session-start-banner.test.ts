@@ -4,7 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { saveCheckpoint } from '../checkpoint';
-import { buildSessionStartContext } from '../tick';
+import { DEFAULT_CONFIG } from '../config';
+import { computeSnapshot } from '../thresholds';
+import { buildResumeOrientation, buildSessionStartContext } from '../tick';
 
 const CHECKPOINT_DIR = '.claude-checkpoints';
 
@@ -60,5 +62,27 @@ describe('buildSessionStartContext', () => {
         expect(out).toContain('lane-c · feature-c');
         expect(out).toContain('Goal C');
         expect(out).toContain('resume <name>');
+    });
+});
+
+describe('buildResumeOrientation', () => {
+    const snap = computeSnapshot({ contextPercent: null, usage: null }, DEFAULT_CONFIG);
+
+    test('with nothing pending, says so and asks for a one-word reply', () => {
+        const out = buildResumeOrientation(CWD, DEFAULT_CONFIG, snap);
+        expect(out).toContain('[pacekeeper-resume]');
+        expect(out).toContain('nothing is pending');
+        expect(out).toContain('single word');
+        expect(out).not.toContain('Run `pacekeeper-checkpoint resume');
+    });
+
+    test('with an active lane, still instructs resume', () => {
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: DEFAULT_CONFIG.checkpoint_dir_name,
+            frontmatter: { name: 'lane' }, body: '## Goal\nGo\n'
+        });
+        const out = buildResumeOrientation(CWD, DEFAULT_CONFIG, snap);
+        expect(out).toContain('Run `pacekeeper-checkpoint resume');
+        expect(out).toContain('Active lane(s): lane');
     });
 });

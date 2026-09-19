@@ -907,10 +907,20 @@ function formatAutoLoopDirective(snap: Snapshot, cfg: Config, blockResetsAt: str
  * archives the consumed checkpoint so it isn't re-surfaced) and re-dispatching
  * + archiving any paused handoffs.
  */
-function buildResumeOrientation(cwd: string, cfg: ReturnType<typeof loadConfig>, snap: Snapshot): string {
+export function buildResumeOrientation(cwd: string, cfg: ReturnType<typeof loadConfig>, snap: Snapshot): string {
     const status = formatStatusLine(snap);
     const active = listActive(cwd, cfg.checkpoint_dir_name);
     const handoffs = listHandoffs(cwd, cfg.checkpoint_dir_name);
+    // Claude Code (≥ 2.1.234) continues a session itself when a usage limit
+    // resets, so this wake can land after the work already resumed and the
+    // checkpoint was consumed. Nothing to orient from → don't ask for a resume.
+    if (active.length === 0 && handoffs.length === 0) {
+        return [
+            status,
+            '',
+            `${RESUME_MARKER} Auto-wake fired, but nothing is pending: no active checkpoint lane and no paused handoffs (the work was already resumed). Reply with a single word.`
+        ].join('\n');
+    }
     const lines = [
         status,
         '',
