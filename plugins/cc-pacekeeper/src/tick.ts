@@ -17,7 +17,7 @@ import {
     type MeterReading,
     type Snapshot
 } from './thresholds';
-import { keepaliveDirective, scanKeepaliveState, scanMarkerCreates, pingGate, pingSuppressedReason, KEEPALIVE_MARKER } from './keepalive';
+import { keepaliveDirective, keepaliveStateFromCrons, scanKeepaliveState, scanMarkerCreates, pingGate, pingSuppressedReason, KEEPALIVE_MARKER } from './keepalive';
 import { levelGt, peekLevel, shouldInjectAndRecord, stateKey, type Level, type Meter } from './state';
 import { touchSession, updateSession, getSessionEntry, type SessionEntry } from './session-state';
 import { detectAfkReturn, formatTimeSegment } from './timeline';
@@ -430,7 +430,9 @@ async function main(): Promise<void> {
                     const hasPendingWork = listActive(cwd, cfg.checkpoint_dir_name).length > 0
                         || listHandoffs(cwd, cfg.checkpoint_dir_name).length > 0;
                     const ka = keepaliveDirective({
-                        cfg, snap, state: scanKeepaliveState(stdin.transcript_path),
+                        cfg, snap,
+                        // Harness registry first (survives /clear + resume); transcript scan as fallback.
+                        state: keepaliveStateFromCrons(stdin.session_crons, KEEPALIVE_MARKER) ?? scanKeepaliveState(stdin.transcript_path),
                         nowMs, hasPendingWork
                     });
                     if (ka.directive) {
