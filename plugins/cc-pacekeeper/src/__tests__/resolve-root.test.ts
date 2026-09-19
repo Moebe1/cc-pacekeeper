@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -182,6 +182,7 @@ describe('worktreeInfo', () => {
 describe('lookupRoot', () => {
     /** A throwaway HOME so git never reads the developer's global config. */
     const GIT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-git-home-'));
+    afterAll(() => { try { fs.rmSync(GIT_HOME, { recursive: true, force: true }); } catch { /* ignore */ } });
 
     /** Keep git off the developer's own ~/.gitconfig (gpg signing, hooksPath). */
     function gitEnv(): NodeJS.ProcessEnv {
@@ -217,6 +218,20 @@ describe('lookupRoot', () => {
             expect(lookupRoot(sub)).toBe(sub);
         } finally {
             fs.rmSync(repo, { recursive: true, force: true });
+        }
+    });
+
+    // The safe-root path returns through realpath, so a symlinked input comes
+    // back canonical — the tmpdir case above short-circuits at the unsafe
+    // guard and never reaches that line.
+    test('a safe root is returned realpath-resolved, even reached through a symlink', () => {
+        execFileSync('git', ['init', '-q'], { cwd: TMP, env: gitEnv() });
+        const link = path.join(FIXTURE_BASE, `link-${path.basename(TMP)}`);
+        fs.symlinkSync(TMP, link);
+        try {
+            expect(lookupRoot(link)).toBe(fs.realpathSync(TMP));
+        } finally {
+            fs.unlinkSync(link);
         }
     });
 

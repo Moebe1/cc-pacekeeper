@@ -492,16 +492,13 @@ describe('SessionStart(compact) re-orientation', () => {
     // Claude Code fires SessionStart(compact) ~200 ms before it flushes the
     // boundary line, so the transcript still describes the discarded
     // conversation: report nothing rather than its size.
-    // `blockPct` also exercises the auto-loop path: above auto.five_hour_pct
-    // its once-per-block directive fires on the same tick and must not re-arm.
-    test.each([40, 90])('a compact start before the boundary is flushed reports no context and disarms the auto-save (5h %i%%)', (blockPct) => {
+    test('a compact start before the boundary is flushed reports no context and disarms the auto-save', () => {
         const sid = newSid();
-        writeUsage(blockPct);
+        writeUsage(40);
         const transcript = writeTranscript(190_000); // pre-compaction size, no boundary yet
-        // Arm ctxAutoSaveArmed the way a real critical climb would (above
-        // auto.five_hour_pct the auto-loop directive covers the same save).
+        // Arm ctxAutoSaveArmed the way a real critical climb would.
         expect(runTick({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript }))
-            .toContain('ctx 95%');
+            .toContain('Context window at critical');
         expect(sessionState()[sid]?.ctxAutoSaveArmed).toBe(true);
 
         const out = runTick({ session_id: sid, hook_event_name: 'SessionStart', source: 'compact', transcript_path: transcript });
@@ -509,6 +506,32 @@ describe('SessionStart(compact) re-orientation', () => {
         expect(ctx).toContain('Context was just compacted');
         expect(ctx).not.toContain('Context window at critical');
         expect(ctx).not.toContain('ctx 9');
+        expect(sessionState()[sid]?.ctxAutoSaveArmed).toBe(false);
+    });
+
+    // The auto-loop fires on the very tick that disarms, and must not re-arm:
+    // the 5h climb happens between the two ticks, in the same block, so the
+    // once-per-block directive is still pending when the compaction lands.
+    test('the auto-loop firing on a compact start does not re-arm the ctx auto-save', () => {
+        const sid = newSid();
+        const resetAt = writeUsage(40); // below auto.five_hour_pct: no auto directive yet
+        const transcript = writeTranscript(190_000);
+        expect(runTick({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript }))
+            .toContain('Context window at critical');
+        expect(sessionState()[sid]?.ctxAutoSaveArmed).toBe(true);
+        expect(sessionState()[sid]?.lastAutoFireResetAt).toBeUndefined();
+
+        // Same block (identical sessionResetAt), now above auto.five_hour_pct.
+        fs.writeFileSync(
+            path.join(HOME, '.cache', 'cc-pacekeeper', 'usage.json'),
+            JSON.stringify({ sessionUsage: 90, sessionResetAt: resetAt, weeklyUsage: 40, fetchedAt: Date.now() })
+        );
+        const out = runTick({ session_id: sid, hook_event_name: 'SessionStart', source: 'compact', transcript_path: transcript });
+        expect(out).toContain('5h 90%');
+        // SessionStart does not surface the auto directive's text, but the
+        // once-per-block stamp is written by that block and nothing else, so
+        // it proves the guarded branch ran on this tick.
+        expect(sessionState()[sid]?.lastAutoFireResetAt).toBeTruthy();
         expect(sessionState()[sid]?.ctxAutoSaveArmed).toBe(false);
     });
 
