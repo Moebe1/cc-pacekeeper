@@ -45,8 +45,10 @@ Claude from the checkpoint it saved.
   compaction summary is lossy; the checkpoint is the record for goal, constraints
   and next step. Previously only an *active* checkpoint got a one-line pointer, and
   a checkpoint resumed in-session is archived, so post-compaction orientation was
-  usually empty. Without a checkpoint this session, Claude is asked to restate the
-  goal and next step and save one at the next natural break.
+  usually empty. The newest checkpoint is scoped to this session when the save
+  recorded a session id, and never a discarded one. Without a checkpoint this
+  session, Claude is asked to restate the goal and next step and save one at the
+  next natural break.
 - **The ctx-critical directive now says not to start a new session** for a full
   context; compaction plus re-injection is the designed path. With auto-compaction
   off (`DISABLE_AUTO_COMPACT` / `autoCompactEnabled: false`) it says the opposite:

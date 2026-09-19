@@ -129,7 +129,9 @@ export function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadCon
     const bodyFromFlag = typeof args.flags.body === 'string' ? args.flags.body : null;
     const bodyFromFile = typeof args.flags['body-file'] === 'string' ? fs.readFileSync(args.flags['body-file'] as string, 'utf8') : null;
     const trigger = (typeof args.flags.trigger === 'string' ? args.flags.trigger : 'user_invoked');
-    const sessionId = typeof args.flags['session-id'] === 'string' ? args.flags['session-id'] : undefined;
+    const sessionIdFlag = args.flags['session-id'];
+    // An unset $CLAUDE_SESSION_ID arrives as '': absent, not a blank stamp.
+    const sessionId = typeof sessionIdFlag === 'string' && sessionIdFlag.trim() !== '' ? sessionIdFlag : undefined;
     const transcriptPath = typeof args.flags['transcript-path'] === 'string' ? args.flags['transcript-path'] : undefined;
     const name = typeof args.flags.name === 'string' ? args.flags.name : undefined;
     const wakeAt = typeof args.flags['wake-at'] === 'string' ? args.flags['wake-at'] : undefined;
@@ -355,7 +357,9 @@ export function verbResume(args: Args, cwd: string, cfg: ReturnType<typeof loadC
 
     printOrientation(ckpt);
 
-    const sessionId = typeof args.flags['session-id'] === 'string' ? args.flags['session-id'] : undefined;
+    const sessionIdFlag = args.flags['session-id'];
+    // An unset $CLAUDE_SESSION_ID arrives as '': absent, not a blank stamp.
+    const sessionId = typeof sessionIdFlag === 'string' && sessionIdFlag.trim() !== '' ? sessionIdFlag : undefined;
     const moved = archiveCheckpoint(ckpt, 'resumed', cwd, cfg.checkpoint_dir_name, {
         resumed_at: new Date().toISOString(),
         ...(sessionId ? { resumed_by_session: sessionId } : {})

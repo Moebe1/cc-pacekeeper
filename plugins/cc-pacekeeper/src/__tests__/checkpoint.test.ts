@@ -326,6 +326,22 @@ describe('newestSince', () => {
         expect(newestSince(CWD, CHECKPOINT_DIR, since, SID)!.body).toContain('Unstamped');
     });
 
+    // What every real save writes today: the skill passes
+    // --session-id "$CLAUDE_SESSION_ID", that variable is empty in the Bash
+    // tool environment, and the frontmatter parser reads an empty scalar as {}.
+    test('keeps a checkpoint whose session_id line is present but empty', () => {
+        const since = Date.parse('2026-06-01T00:00:00.000Z');
+        const dir = path.join(CWD, CHECKPOINT_DIR);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+            path.join(dir, 'lane-2026-06-01T01-00-00.md'),
+            '---\nstatus: active\ncreated_at: 2026-06-01T01:00:00.000Z\nname: lane\nsession_id:\n---\n\n## Goal\nBlank-stamped\n'
+        );
+        const found = newestSince(CWD, CHECKPOINT_DIR, since, SID);
+        expect(found).not.toBeNull();
+        expect(found!.body).toContain('Blank-stamped');
+    });
+
     test('skips a checkpoint the user explicitly discarded', () => {
         const since = Date.parse('2026-06-01T00:00:00.000Z');
         saveCheckpoint({

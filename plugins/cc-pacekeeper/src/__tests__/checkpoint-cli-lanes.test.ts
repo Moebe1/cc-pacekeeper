@@ -295,4 +295,12 @@ describe('save: goal lock', () => {
         const legacy = await save(['--name', 'lane', '--body-file', bodyFile('## Status\n- no goal section here\n')]);
         expect(legacy.code).toBeUndefined();
     });
+
+    // `--session-id "$CLAUDE_SESSION_ID"` with the variable unset arrives as an
+    // empty string; stamping it writes a blank key the parser cannot read back.
+    test('an empty --session-id is treated as absent, not stamped blank', async () => {
+        await save(['--name', 'lane', '--session-id', '', '--body-file', bodyFile('## Goal\nDo it\n')]);
+        const active = listActive(CWD, CHECKPOINT_DIR)[0]!;
+        expect(readCheckpoint(active.path)!.frontmatter.session_id).toBeUndefined();
+    });
 });

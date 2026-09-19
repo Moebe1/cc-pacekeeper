@@ -318,8 +318,13 @@ export function newestSince(
     sessionId: string
 ): Checkpoint | null {
     const stamp = (c: Checkpoint): number => Date.parse(c.frontmatter.created_at);
-    const mine = (c: Checkpoint): boolean =>
-        c.frontmatter.session_id === undefined || c.frontmatter.session_id === sessionId;
+    // A blank `session_id:` line parses to {}, not to a string — older saves
+    // (and any `--session-id "$CLAUDE_SESSION_ID"` with the variable unset)
+    // look like that, and they must count as unstamped, not as someone else's.
+    const mine = (c: Checkpoint): boolean => {
+        const sid = c.frontmatter.session_id;
+        return typeof sid !== 'string' || sid === '' || sid === sessionId;
+    };
     return [...listLive(cwd, checkpointDirName), ...listArchive(cwd, checkpointDirName)]
         .filter(c => Number.isFinite(stamp(c)) && stamp(c) >= sinceMs
             && mine(c) && c.frontmatter.discard_reason === undefined)
