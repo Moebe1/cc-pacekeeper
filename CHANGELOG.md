@@ -6,7 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-The context meter now agrees with Claude Code, and an in-session compaction re-orients
+The context meter now follows Claude Code's own compaction point — including the 200K
+hold under `CLAUDE_CODE_DISABLE_1M_CONTEXT` — and an in-session compaction re-orients
 Claude from the checkpoint it saved.
 
 ### Fixed
@@ -37,7 +38,9 @@ Claude from the checkpoint it saved.
   usually empty. Without a checkpoint this session, Claude is asked to restate the
   goal and next step and save one at the next natural break.
 - **The ctx-critical directive now says not to start a new session** for a full
-  context; compaction plus re-injection is the designed path.
+  context; compaction plus re-injection is the designed path. With auto-compaction
+  off (`DISABLE_AUTO_COMPACT` / `autoCompactEnabled: false`) it says the opposite:
+  start a fresh session from the checkpoint before the limit.
 - **Keepalive dedup reads the Stop hook's `session_crons`** (the harness's own cron
   registry) when present, falling back to the transcript scan on older Claude Code.
 
