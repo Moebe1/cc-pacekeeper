@@ -9,7 +9,7 @@ Persistent resumable handoff files for cc-pacekeeper. All operations run via the
 
 ## Lanes
 
-Checkpoints are organized into named **lanes** — parallel active checkpoints that don't supersede one another. A lane defaults to the sanitized current git branch name (lowercase, non-`[a-z0-9]` runs collapsed to `-`), or `default` outside a repo / on detached HEAD. Pass `--name <slug>` to `save` to pick a lane explicitly.
+Checkpoints are organized into named **lanes** — parallel active checkpoints that don't supersede one another. A lane defaults to the sanitized current git branch name (lowercase, non-`[a-z0-9]` runs collapsed to `-`), or `default` outside a repo / on detached HEAD; from a linked worktree it is the *worktree's* branch, not the main checkout's, even though the file is written at the main repo root. Pass `--name <slug>` to `save` to pick a lane explicitly.
 
 Saving into a lane only supersedes the *previous active checkpoint in that same lane* — actives in other lanes are left untouched. This is what lets you keep a checkpoint alive on `main` while iterating on a feature branch in a worktree, for instance.
 

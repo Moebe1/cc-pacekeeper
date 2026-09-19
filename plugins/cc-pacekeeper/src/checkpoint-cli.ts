@@ -163,12 +163,24 @@ export function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadCon
             return;
         }
 
+        // Provenance and lane: if the session was running in a *linked*
+        // worktree, record the worktree path + its branch so resume can
+        // re-enter it. Resolve from the session's real dir (transcript cwd →
+        // process cwd), before `cwd` was snapped to the main repo root.
+        const sessionDir = (transcriptPath ? projectRootFromTranscript(transcriptPath) : undefined) ?? process.cwd();
+        const wt = worktreeInfo(sessionDir);
+        const worktreeProvenance = wt?.isWorktree ? wt.worktreeRoot : undefined;
+        // The lane follows the branch the session is ON. Without this the lane
+        // came from `cwd` — the MAIN checkout — so every worktree session saved
+        // into the main branch's lane (observed live: lane `main`).
+        const laneSource = name ?? (wt?.isWorktree ? wt.branch : undefined);
+
         // Goal lock: a same-lane save carries the lane's Goal forward verbatim.
         // A changed Goal is refused unless --goal-changed says the user really
         // redirected the work — the moment where "is this a new goal?" must be
         // explicit, not a paraphrase drifting one save at a time. Legacy bodies
         // without a Goal section and lanes with no recent anchor pass through.
-        const lane = resolveLaneName(name, cwd);
+        const lane = resolveLaneName(laneSource, cwd);
         const anchor = laneGoalAnchor(cwd, cfg.checkpoint_dir_name, lane, cfg.checkpoint.stale_after_days);
         const newGoal = goalSection(body);
         const anchorGoal = anchor ? goalSection(anchor.body) : null;
@@ -189,19 +201,11 @@ export function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadCon
 
         const meters = gatherMeters(transcriptPath, cfg.context_window_size);
 
-        // Provenance: if the session was running in a *linked* worktree, record
-        // the worktree path + its branch so resume can re-enter it. Resolve from
-        // the session's real dir (transcript cwd → process cwd), before `cwd`
-        // was snapped to the main repo root.
-        const sessionDir = (transcriptPath ? projectRootFromTranscript(transcriptPath) : undefined) ?? process.cwd();
-        const wt = worktreeInfo(sessionDir);
-        const worktreeProvenance = wt?.isWorktree ? wt.worktreeRoot : undefined;
-
         const { path: written, supersededPaths } = saveCheckpoint({
             cwd,
             checkpointDirName: cfg.checkpoint_dir_name,
             frontmatter: {
-                name,
+                name: laneSource,
                 session_id: sessionId,
                 trigger,
                 meters: Object.keys(meters).length > 0 ? meters : undefined,

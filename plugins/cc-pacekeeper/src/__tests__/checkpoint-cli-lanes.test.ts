@@ -11,6 +11,8 @@ import { parseArgs, verbCleanup, verbDiscard, verbList, verbPeek, verbResume, ve
 const CLI = path.join(import.meta.dir, '..', 'checkpoint-cli.ts');
 // Safe-root fixtures cannot live under the tmpdir (resolveProjectRoot refuses it).
 const FIXTURE_BASE = path.join(import.meta.dir, '.cli-fixtures');
+/** Fixture dirs removed after each test. */
+const cleanups: string[] = [];
 
 const CHECKPOINT_DIR = '.claude-checkpoints';
 const cfg = DEFAULT_CONFIG;
@@ -24,6 +26,9 @@ beforeEach(() => {
 
 afterEach(() => {
     try { fs.rmSync(CWD, { recursive: true, force: true }); } catch { /* ignore */ }
+    for (const dir of cleanups.splice(0)) {
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
 });
 
 /** Capture everything written to stdout while `fn` runs. */
@@ -364,6 +369,54 @@ describe('save: goal lock', () => {
         const saved = listActive(CWD, CHECKPOINT_DIR)[0]!;
         expect(saved.frontmatter.session_id).toBe('sid-9');
         expect((saved.frontmatter.meters as Record<string, unknown>).context_pct).toBe(25);
+    });
+});
+
+describe('save: lane from a linked worktree', () => {
+    // The root is snapped to the MAIN repo, whose branch is not the one the
+    // session is working on; the lane must follow the worktree's branch.
+    function worktreeProject(): { proj: string; wt: string; cfgDir: string; sid: string } {
+        fs.mkdirSync(FIXTURE_BASE, { recursive: true });
+        const proj = fs.mkdtempSync(path.join(FIXTURE_BASE, 'lane-'));
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-lane-home-'));
+        const env = { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: '/dev/null' };
+        execFileSync('git', ['init', '-q', proj], { env });
+        execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-q', '-m', 'init'], { cwd: proj, env });
+        const wt = path.join(proj, '.worktrees', 'wt');
+        execFileSync('git', ['worktree', 'add', '-q', '-b', 'feat/wt', wt], { cwd: proj, env });
+        const sid = 'sid-lane';
+        const cfgDir = path.join(home, '.claude');
+        fs.mkdirSync(path.join(cfgDir, 'projects', '-p'), { recursive: true });
+        fs.writeFileSync(
+            path.join(cfgDir, 'projects', '-p', `${sid}.jsonl`),
+            JSON.stringify({ type: 'user', cwd: wt, sessionId: sid }) + '\n'
+        );
+        cleanups.push(proj, home);
+        return { proj, wt, cfgDir, sid };
+    }
+
+    test('the lane is the worktree\'s branch, and the checkpoint lands at the main root', async () => {
+        const { proj, cfgDir, sid } = worktreeProject();
+        const body = path.join(proj, 'b.md');
+        fs.writeFileSync(body, '## Goal\nShip it\n');
+        const prev = process.env.CLAUDE_CONFIG_DIR;
+        process.env.CLAUDE_CONFIG_DIR = cfgDir;
+        try {
+            await verbSave(parseArgs(['save', '--session-id', sid, '--body-file', body]), proj, cfg);
+            const saved = listActive(proj, CHECKPOINT_DIR);
+            expect(saved).toHaveLength(1);
+            expect(saved[0]!.frontmatter.name).toBe('feat-wt');
+            expect(saved[0]!.path.startsWith(proj)).toBe(true);
+
+            // Second save from the same worktree: the anchor lane matches, so
+            // the identical Goal is not refused as a lane mismatch.
+            process.exitCode = 0;
+            await verbSave(parseArgs(['save', '--session-id', sid, '--body-file', body]), proj, cfg);
+            expect(process.exitCode).toBe(0);
+            expect(listActive(proj, CHECKPOINT_DIR)[0]!.frontmatter.name).toBe('feat-wt');
+        } finally {
+            if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prev;
+        }
     });
 });
 

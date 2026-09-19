@@ -24,6 +24,10 @@ Claude from the checkpoint it saved.
 
 ### Fixed
 
+- **A save from a linked worktree landed in the main checkout's lane.** The checkpoint
+  is written at the main repo root, and the lane was derived from that root's branch —
+  so every worktree session saved into lane `main`. The lane now follows the worktree's
+  own branch (the goal-lock anchor uses the same lane, so repeat saves still match).
 - **Post-compaction tick, first live run.** Two fixes from the first real `/compact` on
   the branch: the tick now looks for checkpoints at the main repo root (where the CLI
   anchors them) instead of the hook's worktree cwd, and on a compact `SessionStart` it
