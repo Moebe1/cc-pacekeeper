@@ -18,7 +18,9 @@ Claude from the checkpoint it saved.
   `--goal-changed` is passed, in which case the file records `goal_changed: true` and
   `list` shows it. Observed live: 15 saves in one lane over 16 hours rewrote the Goal
   five times and accreted progress notes into it — each rewrite authored from a summary
-  plus the previous checkpoint. Legacy bodies without a Goal section are never refused.
+  plus the previous checkpoint. Legacy bodies without a Goal section are never refused —
+  and because such a save supersedes the lane's anchor, it also dissolves the lock for that
+  lane until the next save with a Goal section sets a new one.
 
 ### Fixed
 
