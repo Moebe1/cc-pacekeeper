@@ -272,6 +272,15 @@ describe('save: goal lock', () => {
         expect(listed).toContain('goal-changed');
     });
 
+    // parseArgs gives a bare flag the next non---- token as its value, so
+    // `--goal-changed true` arrives as the string 'true'. Presence is consent.
+    test('--goal-changed followed by a value is still the flag, not a refusal', async () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane' }, body: GOAL_A });
+        const { code } = await save(['--name', 'lane', '--goal-changed', 'true', '--body-file', bodyFile('## Goal\nBuild a dashboard instead.\n')]);
+        expect(code).toBeUndefined();
+        expect(listActive(CWD, CHECKPOINT_DIR)[0]!.frontmatter.goal_changed).toBe(true);
+    });
+
     test('--goal-changed with an unchanged goal is not recorded', async () => {
         saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane' }, body: GOAL_A });
         await save(['--name', 'lane', '--goal-changed', '--body-file', bodyFile(GOAL_A)]);

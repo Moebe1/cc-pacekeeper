@@ -302,6 +302,21 @@ describe('newestSince', () => {
         expect(found.frontmatter.status).toBe('resumed');
     });
 
+    // Yesterday's checkpoint, resumed this morning, IS this session's record.
+    // Goal lock refuses a paraphrased re-save, so without this the
+    // post-compaction context would have nothing left to re-inject.
+    test('a checkpoint created before `since` but resumed after it still counts', () => {
+        const since = Date.parse('2026-06-01T00:00:00.000Z');
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'lane', created_at: '2026-05-31T09:00:00.000Z' }, body: '## Goal\nYesterday\n'
+        });
+        archiveCheckpoint(listActive(CWD, CHECKPOINT_DIR)[0]!, 'resumed', CWD, CHECKPOINT_DIR, { resumed_at: '2026-06-01T01:00:00.000Z' });
+        const found = newestSince(CWD, CHECKPOINT_DIR, since, SID);
+        expect(found).not.toBeNull();
+        expect(found!.body).toContain('Yesterday');
+    });
+
     test('skips another session\'s checkpoint but keeps an unstamped one', () => {
         const since = Date.parse('2026-06-01T00:00:00.000Z');
         saveCheckpoint({

@@ -162,7 +162,7 @@ export function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadCon
         const newGoal = goalSection(body);
         const anchorGoal = anchor ? goalSection(anchor.body) : null;
         const goalChanged = anchorGoal !== null && newGoal !== null && normalizeGoal(anchorGoal) !== normalizeGoal(newGoal);
-        if (goalChanged && args.flags['goal-changed'] !== true) {
+        if (goalChanged && args.flags['goal-changed'] === undefined) {
             process.stdout.write([
                 `Goal differs from lane "${lane}"'s current goal — nothing saved.`,
                 `Lane goal (${path.basename(anchor!.path)}, ${anchor!.frontmatter.status}):`,
