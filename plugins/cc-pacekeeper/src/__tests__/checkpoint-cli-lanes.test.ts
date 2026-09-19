@@ -5,7 +5,7 @@ import * as path from 'path';
 
 import { saveCheckpoint, listActive, listArchive, readCheckpoint } from '../checkpoint';
 import { DEFAULT_CONFIG } from '../config';
-import { parseArgs, verbCleanup, verbDiscard, verbList, verbPeek, verbResume } from '../checkpoint-cli';
+import { parseArgs, verbCleanup, verbDiscard, verbList, verbPeek, verbResume, verbSave } from '../checkpoint-cli';
 
 const CHECKPOINT_DIR = '.claude-checkpoints';
 const cfg = DEFAULT_CONFIG;
@@ -208,5 +208,91 @@ describe('cleanup keeps newest per lane', () => {
         const active = listActive(CWD, CHECKPOINT_DIR);
         expect(active).toHaveLength(1);
         expect(active[0]?.body).toContain('Newer');
+    });
+});
+
+describe('save: goal lock', () => {
+    function bodyFile(body: string): string {
+        const p = path.join(CWD, `body-${Math.random().toString(36).slice(2)}.md`);
+        fs.writeFileSync(p, body);
+        return p;
+    }
+    async function save(argv: string[]): Promise<{ out: string; code: number | undefined }> {
+        // Bun ignores `process.exitCode = undefined`, so 0 is the "unset" sentinel.
+        process.exitCode = 0;
+        let out = '';
+        const chunks: string[] = [];
+        const original = process.stdout.write.bind(process.stdout);
+        process.stdout.write = ((chunk: string) => { chunks.push(String(chunk)); return true; }) as typeof process.stdout.write;
+        try {
+            await verbSave(parseArgs(['save', ...argv]), CWD, cfg);
+        } finally {
+            process.stdout.write = original;
+        }
+        out = chunks.join('');
+        const code = process.exitCode === 0 ? undefined : process.exitCode as number;
+        process.exitCode = 0;
+        return { out, code };
+    }
+    const GOAL_A = '## Goal\nShip the excavator demo, "fake nothing".\n\n## Status\n- step 1\n';
+
+    test('same goal (modulo whitespace) saves and supersedes as before', async () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane' }, body: GOAL_A });
+        const { out, code } = await save(['--name', 'lane', '--body-file', bodyFile('## Goal\nShip the excavator demo,\n"fake nothing".\n\n## Status\n- step 2\n')]);
+        expect(code).toBeUndefined();
+        expect(out).toContain('Saved checkpoint');
+        const active = listActive(CWD, CHECKPOINT_DIR);
+        expect(active).toHaveLength(1);
+        expect(active[0]!.body).toContain('step 2');
+        expect(active[0]!.frontmatter.goal_changed).toBeUndefined();
+    });
+
+    test('a different goal without --goal-changed is refused: exit 2, both goals printed, nothing written', async () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane' }, body: GOAL_A });
+        const { out, code } = await save(['--name', 'lane', '--body-file', bodyFile('## Goal\nBuild a dashboard instead.\n\n## Status\n- pivoted\n')]);
+        expect(code).toBe(2);
+        expect(out).toContain('Goal differs');
+        expect(out).toContain('Ship the excavator demo');
+        expect(out).toContain('Build a dashboard instead');
+        expect(out).toContain('--goal-changed');
+        const active = listActive(CWD, CHECKPOINT_DIR);
+        expect(active).toHaveLength(1);
+        expect(active[0]!.body).toContain('step 1');
+        expect(listArchive(CWD, CHECKPOINT_DIR)).toHaveLength(0);
+    });
+
+    test('with --goal-changed the save goes through and is marked', async () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane' }, body: GOAL_A });
+        const { code } = await save(['--name', 'lane', '--goal-changed', '--body-file', bodyFile('## Goal\nBuild a dashboard instead.\n')]);
+        expect(code).toBeUndefined();
+        const active = listActive(CWD, CHECKPOINT_DIR)[0]!;
+        expect(active.body).toContain('Build a dashboard');
+        expect(active.frontmatter.goal_changed).toBe(true);
+        const listed = captureStdout(() => verbList(parseArgs(['list']), CWD, cfg));
+        expect(listed).toContain('goal-changed');
+    });
+
+    test('--goal-changed with an unchanged goal is not recorded', async () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane' }, body: GOAL_A });
+        await save(['--name', 'lane', '--goal-changed', '--body-file', bodyFile(GOAL_A)]);
+        expect(listActive(CWD, CHECKPOINT_DIR)[0]!.frontmatter.goal_changed).toBeUndefined();
+    });
+
+    test('the anchor survives an in-session resume (archived, resumed): a paraphrase after compaction is still refused', async () => {
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane' }, body: GOAL_A });
+        captureStdout(() => verbResume(parseArgs(['resume', 'lane']), CWD, cfg));
+        expect(listActive(CWD, CHECKPOINT_DIR)).toHaveLength(0);
+        const { code, out } = await save(['--name', 'lane', '--body-file', bodyFile('## Goal\nShip the excavator demo (faking nothing), plus a dashboard.\n')]);
+        expect(code).toBe(2);
+        expect(out).toContain('Goal differs');
+        expect(listActive(CWD, CHECKPOINT_DIR)).toHaveLength(0);
+    });
+
+    test('no Goal section in the new body, or no anchor in the lane: never refused', async () => {
+        const first = await save(['--name', 'fresh', '--body-file', bodyFile('## Goal\nAnything\n')]);
+        expect(first.code).toBeUndefined();
+        saveCheckpoint({ cwd: CWD, checkpointDirName: CHECKPOINT_DIR, frontmatter: { name: 'lane' }, body: GOAL_A });
+        const legacy = await save(['--name', 'lane', '--body-file', bodyFile('## Status\n- no goal section here\n')]);
+        expect(legacy.code).toBeUndefined();
     });
 });

@@ -13,6 +13,10 @@ import {
     readCheckpoint,
     saveCheckpoint,
     ageDays,
+    goalSection,
+    laneGoalAnchor,
+    normalizeGoal,
+    resolveLaneName,
     type Checkpoint
 } from './checkpoint';
 import { contextPercent, readContextTokens, resolveUsableContextWindow } from './ctx-tokens';
@@ -66,12 +70,16 @@ function shortGoal(body: string): string {
     return first || '(empty goal)';
 }
 
+function indent(text: string): string {
+    return text.split('\n').map(l => `    ${l}`).join('\n');
+}
+
 function buildSavePrompt(cwd: string): void {
     // Used when invoked without stdin body content: emit a template to stdout
     // for Claude to fill in and re-invoke with --body.
     const tpl = [
         '## Goal',
-        '<one-line statement of what this session is trying to accomplish>',
+        '<the user\'s request in their own words, quoted verbatim; on later saves in this lane copy the lane goal verbatim — progress goes under Status>',
         '',
         '## Status',
         '<where we are in the plan; bullet list of completed steps>',
@@ -117,7 +125,7 @@ function gatherMeters(transcriptPath: string | undefined, configWindowSize: numb
     return meters;
 }
 
-function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadConfig>): Promise<void> | void {
+export function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadConfig>): Promise<void> | void {
     const bodyFromFlag = typeof args.flags.body === 'string' ? args.flags.body : null;
     const bodyFromFile = typeof args.flags['body-file'] === 'string' ? fs.readFileSync(args.flags['body-file'] as string, 'utf8') : null;
     const trigger = (typeof args.flags.trigger === 'string' ? args.flags.trigger : 'user_invoked');
@@ -138,6 +146,30 @@ function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadConfig>): 
         }
         if (body === null || body.trim() === '') {
             buildSavePrompt(cwd);
+            process.exitCode = 2;
+            return;
+        }
+
+        // Goal lock: a same-lane save carries the lane's Goal forward verbatim.
+        // A changed Goal is refused unless --goal-changed says the user really
+        // redirected the work — the moment where "is this a new goal?" must be
+        // explicit, not a paraphrase drifting one save at a time. Legacy bodies
+        // without a Goal section and lanes with no recent anchor pass through.
+        const lane = resolveLaneName(name, cwd);
+        const anchor = laneGoalAnchor(cwd, cfg.checkpoint_dir_name, lane, cfg.checkpoint.stale_after_days);
+        const newGoal = goalSection(body);
+        const anchorGoal = anchor ? goalSection(anchor.body) : null;
+        const goalChanged = anchorGoal !== null && newGoal !== null && normalizeGoal(anchorGoal) !== normalizeGoal(newGoal);
+        if (goalChanged && args.flags['goal-changed'] !== true) {
+            process.stdout.write([
+                `Goal differs from lane "${lane}"'s current goal — nothing saved.`,
+                `Lane goal (${path.basename(anchor!.path)}, ${anchor!.frontmatter.status}):`,
+                indent(anchorGoal!),
+                'This save\'s goal:',
+                indent(newGoal!),
+                'If the user changed the goal this session, re-run with --goal-changed. Otherwise copy the lane goal verbatim into ## Goal and put what changed under ## Status.',
+                ''
+            ].join('\n'));
             process.exitCode = 2;
             return;
         }
@@ -164,7 +196,8 @@ function verbSave(args: Args, cwd: string, cfg: ReturnType<typeof loadConfig>): 
                 ...(worktreeProvenance ? { worktree: worktreeProvenance } : {}),
                 ...(wt?.isWorktree && wt.branch ? { git_branch: wt.branch } : {}),
                 ...(wakeAt ? { wake_at: wakeAt } : {}),
-                ...(wakePrompt ? { wake_prompt: wakePrompt } : {})
+                ...(wakePrompt ? { wake_prompt: wakePrompt } : {}),
+                ...(goalChanged ? { goal_changed: true } : {})
             },
             body
         });
@@ -187,7 +220,7 @@ export function verbList(args: Args, cwd: string, cfg: ReturnType<typeof loadCon
     }
     const rows = items.map((c, i) => {
         const age = ageDays(c).toFixed(1);
-        const status = c.frontmatter.status;
+        const status = c.frontmatter.status + (c.frontmatter.goal_changed ? ' goal-changed' : '');
         const goal = shortGoal(c.body);
         const name = laneOf(c.frontmatter);
         const branch = c.frontmatter.git_branch ?? '-';
@@ -479,7 +512,7 @@ function verbHelp(): void {
         '',
         'Verbs:',
         '  save [--body <text> | --body-file <path>] [--trigger <kind>] [--name <slug>]',
-        '       [--session-id <id>] [--transcript-path <path>] [--cwd <path>]',
+        '       [--session-id <id>] [--transcript-path <path>] [--cwd <path>] [--goal-changed]',
         '       [--wake-at <iso>] [--wake-prompt <text>]',
         '       Write a new active checkpoint in the given lane (default: current',
         '       branch, sanitized). Only prior actives in the SAME lane are',
