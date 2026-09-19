@@ -64,6 +64,45 @@ describe('readContextTokens', () => {
         const tokens = readContextTokens(TRANSCRIPT)!;
         expect(tokens.inputTotal).toBe(99);
     });
+
+    test('after a compact_boundary with no assistant turn since, reports the boundary postTokens', () => {
+        const lines = [
+            { type: 'assistant', message: { usage: { input_tokens: 32, cache_read_input_tokens: 830_000 } } },
+            { type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'auto', preTokens: 830_263, postTokens: 21_531 } },
+            { type: 'user', isCompactSummary: true, message: { content: 'This session is being continued…' } }
+        ];
+        fs.writeFileSync(TRANSCRIPT, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+        const t = readContextTokens(TRANSCRIPT)!;
+        expect(t.contextLength).toBe(21_531);
+        expect(t.model).toBeUndefined();
+    });
+
+    test('an assistant turn after the boundary takes over from postTokens', () => {
+        const lines = [
+            { type: 'system', subtype: 'compact_boundary', compactMetadata: { postTokens: 21_531 } },
+            { type: 'assistant', message: { usage: { input_tokens: 2, cache_creation_input_tokens: 41_461, cache_read_input_tokens: 36_458 } } }
+        ];
+        fs.writeFileSync(TRANSCRIPT, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+        expect(readContextTokens(TRANSCRIPT)!.contextLength).toBe(2 + 41_461 + 36_458);
+    });
+
+    test('a boundary without postTokens yields null rather than the stale pre-compaction size', () => {
+        const lines = [
+            { type: 'assistant', message: { usage: { input_tokens: 830_000 } } },
+            { type: 'system', subtype: 'compact_boundary' }
+        ];
+        fs.writeFileSync(TRANSCRIPT, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+        expect(readContextTokens(TRANSCRIPT)).toBeNull();
+    });
+
+    test('a sidechain boundary is ignored', () => {
+        const lines = [
+            { type: 'assistant', message: { usage: { input_tokens: 500 } } },
+            { type: 'system', subtype: 'compact_boundary', isSidechain: true, compactMetadata: { postTokens: 1 } }
+        ];
+        fs.writeFileSync(TRANSCRIPT, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+        expect(readContextTokens(TRANSCRIPT)!.contextLength).toBe(500);
+    });
 });
 
 describe('readContextTokens — model extraction', () => {

@@ -11,7 +11,9 @@ import { readCachedMaxInputTokens } from './model-info';
  * Strategy: walk the file backwards looking for the most recent assistant turn that
  * carries a `message.usage` object. That `usage` is cumulative for the conversation
  * up to that point (it reflects what was sent to the model on that turn), so it is
- * the right number for "how full is the context right now."
+ * the right number for "how full is the context right now." A compact_boundary
+ * entry met before any assistant usage short-circuits to its postTokens (see
+ * CompactBoundarySchema).
  *
  * Returns null if the transcript can't be read or has no usable usage record yet.
  */
@@ -30,6 +32,20 @@ const AssistantMessageSchema = z.object({
         model: z.string().optional(),
         usage: UsageSchema.optional()
     }).optional()
+});
+
+/**
+ * Claude Code writes this system entry when it compacts. Every usage record
+ * above it describes the discarded conversation, so once we meet it walking
+ * backwards the honest answer is the post-compaction size it carries.
+ * `postTokens` is the summary + preserved tail; the fixed prefix (system
+ * prompt, tools) is added back by the first real assistant turn's usage.
+ */
+const CompactBoundarySchema = z.object({
+    type: z.literal('system'),
+    subtype: z.literal('compact_boundary'),
+    isSidechain: z.boolean().optional(),
+    compactMetadata: z.object({ postTokens: z.number().optional() }).optional()
 });
 
 export interface ContextTokens {
@@ -55,6 +71,13 @@ export function readContextTokens(transcriptPath: string): ContextTokens | null 
         if (!line || line.length === 0) continue;
         let obj: unknown;
         try { obj = JSON.parse(line); } catch { continue; }
+        const boundary = CompactBoundarySchema.safeParse(obj);
+        if (boundary.success) {
+            if (boundary.data.isSidechain === true) continue;
+            const post = boundary.data.compactMetadata?.postTokens;
+            if (post === undefined) return null;
+            return { inputTotal: post, outputTotal: 0, cached: 0, contextLength: post };
+        }
         const parsed = AssistantMessageSchema.safeParse(obj);
         if (!parsed.success) continue;
         if (parsed.data.isSidechain === true) continue;
