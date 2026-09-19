@@ -131,9 +131,32 @@ export function readMostRecentModel(transcriptPath: string): string | null {
  *  — docs, model-config § Default auto-compact thresholds). */
 export const ONE_M_AUTOCOMPACT_TOKENS = 967_000;
 
+/** Claude Code clamps the auto-compact window to this range (docs,
+ *  settings-reference: "number of tokens, from 100000 to 1000000"). */
+const AUTO_COMPACT_MIN_TOKENS = 100_000;
+const AUTO_COMPACT_MAX_TOKENS = 1_000_000;
+
+function clampAutoCompact(tokens: number): number {
+    return Math.min(AUTO_COMPACT_MAX_TOKENS, Math.max(AUTO_COMPACT_MIN_TOKENS, tokens));
+}
+
 /**
- * Parse a window size in the forms `/autocompact` accepts: a plain token
- * count, `500k` / `1M`, or a bare 100..1000 meaning thousands. Null otherwise.
+ * Parse CLAUDE_CODE_AUTO_COMPACT_WINDOW, which takes a plain token count ONLY
+ * (docs, env-vars reference): `500k` reads as `500` — and then clamps to the
+ * 100K minimum. Deliberately not parseWindowSetting: mirroring Claude Code's
+ * value semantics is the whole point of this denominator.
+ */
+function parseWindowEnv(raw: unknown): number | null {
+    if (typeof raw !== 'string') return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Parse a window size in the forms the `autoCompactWindow` setting and the
+ * `/autocompact` command accept (NOT the env var — see parseWindowEnv): a
+ * plain token count, `500k` / `1M`, or a bare 100..1000 meaning thousands.
+ * Null otherwise.
  */
 export function parseWindowSetting(raw: unknown): number | null {
     if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : null;
@@ -167,7 +190,8 @@ export type AutoCompactSource = 'env' | 'settings' | 'model-default';
  * 100% exactly when compaction is due, matching Claude Code's own meter.
  * Precedence mirrors Claude Code: CLAUDE_CODE_AUTO_COMPACT_WINDOW → the
  * `autoCompactWindow` user setting → the model default (~967K for 1M windows,
- * the full window otherwise). Always capped at the window.
+ * the full window otherwise). Either override is clamped to [100K, 1M] as
+ * Claude Code clamps it, then capped at the window.
  *
  * Historical note: until this change the denominator was 0.8 × window
  * (ccstatusline's "usable" ratio). On 1M models that reported ~95% at a real
@@ -179,9 +203,9 @@ export function autoCompactWindow(
     env: NodeJS.ProcessEnv = process.env,
     settingsWindow: number | null = readAutoCompactSetting()
 ): { tokens: number; source: AutoCompactSource } {
-    const fromEnv = parseWindowSetting(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
-    if (fromEnv !== null) return { tokens: Math.min(fromEnv, maxTokens), source: 'env' };
-    if (settingsWindow !== null) return { tokens: Math.min(settingsWindow, maxTokens), source: 'settings' };
+    const fromEnv = parseWindowEnv(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
+    if (fromEnv !== null) return { tokens: Math.min(clampAutoCompact(fromEnv), maxTokens), source: 'env' };
+    if (settingsWindow !== null) return { tokens: Math.min(clampAutoCompact(settingsWindow), maxTokens), source: 'settings' };
     return { tokens: maxTokens >= 1_000_000 ? ONE_M_AUTOCOMPACT_TOKENS : maxTokens, source: 'model-default' };
 }
 

@@ -236,6 +236,23 @@ describe('autoCompactWindow', () => {
     test('an unparseable env value is ignored', () => {
         expect(autoCompactWindow(1_000_000, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: 'lots' }, null).source).toBe('model-default');
     });
+
+    // The env var takes a plain token count only (docs, env-vars reference):
+    // `500k` reads as `500`, which then clamps to the documented 100K floor.
+    test('the env var is a plain integer: 500k reads as 500 and clamps to the floor', () => {
+        expect(autoCompactWindow(1_000_000, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '500k' }, null))
+            .toEqual({ tokens: 100_000, source: 'env' });
+    });
+
+    test('env and settings values clamp to [100K, 1M] before the window cap', () => {
+        expect(autoCompactWindow(1_000_000, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '50000' }, null))
+            .toEqual({ tokens: 100_000, source: 'env' });
+        expect(autoCompactWindow(1_000_000, {}, 50_000)).toEqual({ tokens: 100_000, source: 'settings' });
+        expect(autoCompactWindow(1_000_000, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '2000000' }, null))
+            .toEqual({ tokens: 1_000_000, source: 'env' });
+        expect(autoCompactWindow(200_000, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '2000000' }, null))
+            .toEqual({ tokens: 200_000, source: 'env' });
+    });
 });
 
 describe('parseWindowSetting / readAutoCompactSetting', () => {
