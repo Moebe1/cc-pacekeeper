@@ -5,7 +5,8 @@ import * as path from 'path';
 
 import {
     autoCompactWindow, contextPercent, ONE_M_AUTOCOMPACT_TOKENS, parseWindowSetting,
-    readAutoCompactSetting, readContextTokens, readMostRecentModel, resolveUsableContextWindow
+    readAutoCompactEnabled, readAutoCompactSetting, readContextTokens, readMostRecentModel,
+    resolveUsableContextWindow
 } from '../ctx-tokens';
 
 let TRANSCRIPT: string;
@@ -300,6 +301,50 @@ describe('parseWindowSetting / readAutoCompactSetting', () => {
             else process.env.CLAUDE_CONFIG_DIR = prev;
             fs.rmSync(dir, { recursive: true, force: true });
         }
+    });
+});
+
+describe('readAutoCompactEnabled', () => {
+    /** Run `fn` with an empty config dir and no DISABLE_AUTO_COMPACT. */
+    function isolated(fn: (dir: string) => void): void {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-ctx-autocompact-'));
+        const prevDir = process.env.CLAUDE_CONFIG_DIR;
+        const prevDisable = process.env.DISABLE_AUTO_COMPACT;
+        process.env.CLAUDE_CONFIG_DIR = dir;
+        delete process.env.DISABLE_AUTO_COMPACT;
+        try {
+            fn(dir);
+        } finally {
+            if (prevDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+            else process.env.CLAUDE_CONFIG_DIR = prevDir;
+            if (prevDisable === undefined) delete process.env.DISABLE_AUTO_COMPACT;
+            else process.env.DISABLE_AUTO_COMPACT = prevDisable;
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    }
+
+    test('defaults to true; DISABLE_AUTO_COMPACT=1 or true turns it off', () => {
+        isolated(() => {
+            expect(readAutoCompactEnabled()).toBe(true);
+            process.env.DISABLE_AUTO_COMPACT = '1';
+            expect(readAutoCompactEnabled()).toBe(false);
+            process.env.DISABLE_AUTO_COMPACT = 'true';
+            expect(readAutoCompactEnabled()).toBe(false);
+            process.env.DISABLE_AUTO_COMPACT = '0';
+            expect(readAutoCompactEnabled()).toBe(true);
+        });
+    });
+
+    test('honors autoCompactEnabled in settings.json, true on anything unreadable', () => {
+        isolated(dir => {
+            const settings = path.join(dir, 'settings.json');
+            fs.writeFileSync(settings, JSON.stringify({ autoCompactEnabled: false }));
+            expect(readAutoCompactEnabled()).toBe(false);
+            fs.writeFileSync(settings, JSON.stringify({ autoCompactEnabled: true }));
+            expect(readAutoCompactEnabled()).toBe(true);
+            fs.writeFileSync(settings, '{not json');
+            expect(readAutoCompactEnabled()).toBe(true);
+        });
     });
 });
 

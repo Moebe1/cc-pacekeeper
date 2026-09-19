@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { bootstrapConfigIfMissing, isProjectDenied, loadConfig, type Config } from './config';
-import { contextPercent, readContextTokens, readMostRecentModel, resolveUsableContextWindow } from './ctx-tokens';
+import { contextPercent, readAutoCompactEnabled, readContextTokens, readMostRecentModel, resolveUsableContextWindow } from './ctx-tokens';
 import { emitAdditionalContext, emitBlock, emitEmpty, readStdinJson } from './hook-io';
 import { recordCrash } from './crash-log';
 import { laneOf, listActive, newestSince } from './checkpoint';
@@ -233,7 +233,12 @@ async function main(): Promise<void> {
         const ctxReading = snap.readings.find(r => r.meter === 'context');
         const armed = sessionEntry.ctxAutoSaveArmed ?? false;
         if (ctxReading && ctxReading.level === 'critical' && !armed) {
-            ctxAutoSaveDirective = formatCtxAutoSaveDirective(snap);
+            // readAutoCompactEnabled() is an fs read; only on the rare tick
+            // that actually fires the directive.
+            ctxAutoSaveDirective = formatCtxAutoSaveDirective(snap, {
+                mainThread: isMainThread,
+                autoCompact: readAutoCompactEnabled()
+            });
             updateSession(key, nowMs, { ctxAutoSaveArmed: true });
         } else if (ctxReading && ctxReading.level !== 'warn' && ctxReading.level !== 'critical' && armed) {
             updateSession(key, nowMs, { ctxAutoSaveArmed: false });
@@ -932,13 +937,22 @@ function formatDispatchAdvisory(snap: Snapshot): string | null {
  * [G4] The combined ctx-critical auto-save directive (context alone, no 5h
  * involvement). Distinct from the auto-loop directive, which folds this in
  * when both fire on the same tick.
+ *
+ * The closing sentence depends on the session: only the main thread sees the
+ * post-compaction SessionStart, and with auto-compaction off there is no
+ * compaction to wait for — the session stops at the limit instead.
  */
-function formatCtxAutoSaveDirective(snap: Snapshot): string {
+function formatCtxAutoSaveDirective(snap: Snapshot, opts: { mainThread: boolean; autoCompact: boolean }): string {
     const status = formatStatusLine(snap);
+    const closing = !opts.mainThread
+        ? ''
+        : opts.autoCompact
+            ? ' Do not start a new session for this: when Claude Code compacts, pacekeeper re-injects this checkpoint.'
+            : ' Auto-compaction is off in this session: start a fresh session from this checkpoint before the context limit.';
     return [
         status,
         '',
-        '🛑 Context window at critical — save now, do not ask: run /cc-pacekeeper:checkpoint save immediately, then continue on small steps until compaction runs. Do not start a new session for this: when Claude Code compacts, pacekeeper re-injects this checkpoint.'
+        `🛑 Context window at critical — save now, do not ask: run /cc-pacekeeper:checkpoint save immediately, then continue on small steps until compaction runs.${closing}`
     ].join('\n');
 }
 

@@ -49,8 +49,10 @@ function writeTranscript(contextTokens: number): string {
     return p;
 }
 
-function runTick(payload: Record<string, unknown>): string {
-    const env: Record<string, string | undefined> = { ...process.env, HOME, CLAUDE_CONFIG_DIR: path.join(HOME, '.claude') };
+function runTick(payload: Record<string, unknown>, extraEnv: Record<string, string> = {}): string {
+    const env: Record<string, string | undefined> = {
+        ...process.env, HOME, CLAUDE_CONFIG_DIR: path.join(HOME, '.claude'), ...extraEnv
+    };
     // The developer's own auto-compact window override must not steer ctx% here.
     delete env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
     const res = spawnSync('bun', ['run', '--silent', TICK], {
@@ -189,6 +191,20 @@ describe('ctx auto-save crossing re-arm [G4]', () => {
         writeTranscript(190_000);
         const fourth = runTick({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript });
         expect(fourth).toContain('Context window at critical');
+    });
+
+    // With auto-compaction off the session stops at the limit instead of
+    // compacting, so "pacekeeper re-injects this checkpoint" would be false.
+    test('with DISABLE_AUTO_COMPACT set, the directive says to start a fresh session', () => {
+        const sid = newSid();
+        const transcript = writeTranscript(190_000);
+        const out = runTick(
+            { session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript },
+            { DISABLE_AUTO_COMPACT: '1' }
+        );
+        expect(out).toContain('Context window at critical');
+        expect(out).toContain('start a fresh session from this checkpoint');
+        expect(out).not.toContain('re-injects this checkpoint');
     });
 
     test('combined 5h+ctx: single auto-loop directive covers both, ctx directive suppressed', () => {

@@ -182,6 +182,25 @@ export function readAutoCompactSetting(): number | null {
     }
 }
 
+/**
+ * Whether Claude Code compacts automatically at all: off via the
+ * `DISABLE_AUTO_COMPACT` env var or `autoCompactEnabled: false` in the user
+ * settings.json. With it off a session stops at the context limit instead of
+ * compacting, so directives that promise a compaction must not be emitted.
+ * Anything unreadable means "on", the default.
+ */
+export function readAutoCompactEnabled(): boolean {
+    try {
+        const disable = process.env.DISABLE_AUTO_COMPACT;
+        if (disable === '1' || disable?.toLowerCase() === 'true') return false;
+        const raw = fs.readFileSync(path.join(getClaudeConfigDir(), 'settings.json'), 'utf8');
+        const parsed = JSON.parse(raw) as { autoCompactEnabled?: unknown };
+        return parsed.autoCompactEnabled !== false;
+    } catch {
+        return true;
+    }
+}
+
 export type AutoCompactSource = 'env' | 'settings' | 'model-default';
 
 /**
