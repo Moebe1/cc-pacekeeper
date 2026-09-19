@@ -300,6 +300,19 @@ export function listActive(cwd: string, checkpointDirName: string): Checkpoint[]
 }
 
 /**
+ * Newest checkpoint created at or after `sinceMs`, live or archived, any
+ * status. Used to re-orient after an in-session compaction: a checkpoint that
+ * was already resumed (archived) this session is still the best record of the
+ * goal — status is about the registry, not about relevance.
+ */
+export function newestSince(cwd: string, checkpointDirName: string, sinceMs: number): Checkpoint | null {
+    const stamp = (c: Checkpoint): number => Date.parse(c.frontmatter.created_at);
+    return [...listLive(cwd, checkpointDirName), ...listArchive(cwd, checkpointDirName)]
+        .filter(c => Number.isFinite(stamp(c)) && stamp(c) >= sinceMs)
+        .sort((a, b) => stamp(b) - stamp(a))[0] ?? null;
+}
+
+/**
  * Move a checkpoint into archive/, updating its status frontmatter.
  * Returns the new path, or null on failure.
  */

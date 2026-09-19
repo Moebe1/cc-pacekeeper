@@ -19,7 +19,7 @@ Legacy checkpoints saved before lanes existed have no `name` in frontmatter; the
 
 | Verb | When to use |
 |---|---|
-| `save [--name <slug>]` | User wants to preserve current state. Limits nearing critical. Before `PreCompact`. End of a working session. Lane defaults to the current branch. |
+| `save [--name <slug>]` | User wants to preserve current state. Limits nearing critical. When the context meter is at warn or critical (compaction is coming; after it runs, pacekeeper re-injects this checkpoint automatically). End of a working session. Lane defaults to the current branch. |
 | `resume [name\|N] [--worktree]` | New session in a project that has active checkpoints. Bare `resume` picks the sole active lane, or lists all lanes and asks you to choose if there are several (nothing is archived in that case). `--worktree` re-enters (or creates) a worktree for the resumed checkpoint afterward. |
 | `peek <name\|N>` | Preview a checkpoint's body without archiving or mutating anything — use when checking a lane before committing to resume it. |
 | `list [--archived]` | User asks "what checkpoints do I have here?" or wants to choose a non-default lane to resume. Shows index, lane name, branch, worktree, age, and first Goal line. |

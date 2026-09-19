@@ -11,6 +11,7 @@ import {
     listActive,
     listArchive,
     listLive,
+    newestSince,
     readCheckpoint,
     resolveLaneName,
     sanitizeLaneName,
@@ -262,5 +263,37 @@ describe('frontmatter parser', () => {
         expect(back.frontmatter.trigger).toBe('a:b');
         expect((back.frontmatter.meters as Record<string, number>)?.context_pct).toBe(78);
         expect(back.frontmatter.files_touched).toEqual(['src/main.ts', 'src/foo:bar.ts']);
+    });
+});
+
+describe('newestSince', () => {
+    test('returns null with no checkpoints or only older ones', () => {
+        expect(newestSince(CWD, CHECKPOINT_DIR, Date.now())).toBeNull();
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'old', created_at: '2026-01-01T00:00:00.000Z' }, body: '## Goal\nOld\n'
+        });
+        expect(newestSince(CWD, CHECKPOINT_DIR, Date.parse('2026-06-01T00:00:00.000Z'))).toBeNull();
+    });
+
+    test('picks the newest by created_at across live and archive, any status', () => {
+        const since = Date.parse('2026-06-01T00:00:00.000Z');
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'lane', created_at: '2026-06-01T01:00:00.000Z' }, body: '## Goal\nFirst\n'
+        });
+        // Superseded by a later save in the same lane → moves to archive/.
+        saveCheckpoint({
+            cwd: CWD, checkpointDirName: CHECKPOINT_DIR,
+            frontmatter: { name: 'lane', created_at: '2026-06-01T02:00:00.000Z' }, body: '## Goal\nSecond\n'
+        });
+        // Resume the active one → archived as resumed; it must STILL be found.
+        const active = listActive(CWD, CHECKPOINT_DIR)[0]!;
+        archiveCheckpoint(active, 'resumed', CWD, CHECKPOINT_DIR, { resumed_at: '2026-06-01T02:05:00.000Z' });
+        expect(listActive(CWD, CHECKPOINT_DIR)).toHaveLength(0);
+
+        const found = newestSince(CWD, CHECKPOINT_DIR, since)!;
+        expect(found.body).toContain('Second');
+        expect(found.frontmatter.status).toBe('resumed');
     });
 });

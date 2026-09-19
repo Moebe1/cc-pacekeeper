@@ -50,9 +50,12 @@ function writeTranscript(contextTokens: number): string {
 }
 
 function runTick(payload: Record<string, unknown>): string {
+    const env: Record<string, string | undefined> = { ...process.env, HOME, CLAUDE_CONFIG_DIR: path.join(HOME, '.claude') };
+    // The developer's own auto-compact window override must not steer ctx% here.
+    delete env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
     const res = spawnSync('bun', ['run', '--silent', TICK], {
         input: JSON.stringify({ cwd: path.join(HOME, 'proj'), ...payload }),
-        env: { ...process.env, HOME, CLAUDE_CONFIG_DIR: path.join(HOME, '.claude') },
+        env,
         encoding: 'utf8'
     });
     return res.stdout ?? '';
@@ -380,5 +383,51 @@ describe('stop_hook_active continuation guard', () => {
         expect(runTick({ session_id: sid, hook_event_name: 'Stop' })).toContain('auto-renewal');
         expect(runTick({ session_id: sid, hook_event_name: 'Stop' })).toBe('{}');
         expect(runTick({ session_id: sid, hook_event_name: 'Stop' })).toBe('{}');
+    });
+});
+
+describe('SessionStart(compact) re-orientation', () => {
+    /** Transcript: a huge pre-compaction usage, then the boundary Claude Code writes. */
+    function writeCompactedTranscript(): string {
+        const p = path.join(HOME, 't.jsonl');
+        fs.writeFileSync(p, [
+            JSON.stringify({ type: 'assistant', message: { role: 'assistant', usage: { input_tokens: 32, cache_read_input_tokens: 830_000 } } }),
+            JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'auto', preTokens: 830_032, postTokens: 21_531 } })
+        ].join('\n') + '\n');
+        return p;
+    }
+
+    test('injects this session\'s checkpoint body and reports the post-compaction ctx', () => {
+        const sid = newSid();
+        writeUsage(40);
+        const transcript = writeCompactedTranscript();
+        // A prior tick establishes sessionStartedAt.
+        runTick({ session_id: sid, hook_event_name: 'UserPromptSubmit', prompt: 'hi', transcript_path: transcript });
+        saveCheckpoint({
+            cwd: path.join(HOME, 'proj'), checkpointDirName: '.claude-checkpoints',
+            frontmatter: { name: 'lane' }, body: '## Goal\nFinish the migration\n\n## Next\n1. Run bun test\n'
+        });
+        const out = runTick({ session_id: sid, hook_event_name: 'SessionStart', source: 'compact', transcript_path: transcript });
+        const ctx = JSON.parse(out).hookSpecificOutput.additionalContext as string;
+        expect(ctx).toContain('Context was just compacted');
+        expect(ctx).toContain('Finish the migration');
+        expect(ctx).toContain('1. Run bun test');
+        // The 830k pre-compaction reading must not leak into this tick.
+        expect(ctx).not.toContain('Context window at critical');
+        expect(ctx).not.toMatch(/ctx (8|9)\d%/);
+    });
+
+    test('a normal startup still gets the pointer banner, not the body', () => {
+        const sid = newSid();
+        writeUsage(40);
+        saveCheckpoint({
+            cwd: path.join(HOME, 'proj'), checkpointDirName: '.claude-checkpoints',
+            frontmatter: { name: 'lane' }, body: '## Goal\nFinish the migration\n\n## Next\n1. Run bun test\n'
+        });
+        const out = runTick({ session_id: sid, hook_event_name: 'SessionStart', source: 'startup' });
+        const ctx = JSON.parse(out).hookSpecificOutput.additionalContext as string;
+        expect(ctx).toContain('Active checkpoint found');
+        expect(ctx).toContain('checkpoint resume');
+        expect(ctx).not.toContain('1. Run bun test');
     });
 });

@@ -3,7 +3,7 @@ import { bootstrapConfigIfMissing, isProjectDenied, loadConfig, type Config } fr
 import { contextPercent, readContextTokens, readMostRecentModel, resolveUsableContextWindow } from './ctx-tokens';
 import { emitAdditionalContext, emitBlock, emitEmpty, readStdinJson } from './hook-io';
 import { recordCrash } from './crash-log';
-import { laneOf, listActive } from './checkpoint';
+import { laneOf, listActive, newestSince } from './checkpoint';
 import {
     computeSnapshot,
     formatArbitrageNudge,
@@ -146,11 +146,17 @@ async function main(): Promise<void> {
     //    present, then continue. Main thread only — SubagentStart has its own
     //    early-return branch above. ──
     let sessionStartBlock = '';
+    const isCompactStart = event === 'SessionStart' && stdin.source === 'compact';
     if (isMainThread && event === 'SessionStart') {
-        sessionStartBlock = buildSessionStartContext(cwd, cfg.checkpoint_dir_name);
+        // After a compaction the summary is all Claude has; hand it this
+        // session's checkpoint body instead of a pointer to run `resume`.
+        sessionStartBlock = isCompactStart
+            ? buildPostCompactContext(cwd, cfg.checkpoint_dir_name, sessionEntry.sessionStartedAt, nowMs)
+            : buildSessionStartContext(cwd, cfg.checkpoint_dir_name);
         // One-time channel onboarding. SessionStart, not Stop: Stop fires every
-        // turn-end, so the question would repeat all session.
-        const onboarding = onboardingDirective(cfg);
+        // turn-end, so the question would repeat all session. Not on a compact
+        // start either — that is the same session, mid-work.
+        const onboarding = isCompactStart ? null : onboardingDirective(cfg);
         if (onboarding) {
             sessionStartBlock = sessionStartBlock ? `${sessionStartBlock}\n\n${onboarding}` : onboarding;
         }
@@ -743,15 +749,78 @@ export function buildSessionStartContext(cwd: string, checkpointDirName: string)
         lines.push('Run `pacekeeper-checkpoint resume <name>` (or `/cc-pacekeeper:checkpoint resume <name>`) to orient from a specific lane.');
     }
 
-    if (handoffs.length > 0) {
+    const handoffLines = formatHandoffLines(handoffs, checkpointDirName);
+    if (handoffLines.length > 0) {
         if (lines.length > 0) lines.push('');
-        lines.push(`📎 ${handoffs.length} paused subagent handoff(s) waiting in ${checkpointDirName}/handoffs/:`);
-        for (const h of handoffs) {
-            lines.push(`   ${h.frontmatter.agent_id} · ${h.frontmatter.agent_type ?? '?'} · ${h.frontmatter.trigger} · ${ageLabel(h.frontmatter.created_at)}`);
-        }
-        lines.push('');
-        lines.push('Re-dispatch the paused work, then archive each via `pacekeeper-checkpoint handoffs archive <agent_id>` once absorbed.');
+        lines.push(...handoffLines);
     }
+    return lines.join('\n');
+}
+
+/** The pending-handoff lines shared by the startup banner and the post-compaction block. */
+function formatHandoffLines(handoffs: ReturnType<typeof listHandoffs>, checkpointDirName: string): string[] {
+    if (handoffs.length === 0) return [];
+    const lines: string[] = [];
+    lines.push(`📎 ${handoffs.length} paused subagent handoff(s) waiting in ${checkpointDirName}/handoffs/:`);
+    for (const h of handoffs) {
+        lines.push(`   ${h.frontmatter.agent_id} · ${h.frontmatter.agent_type ?? '?'} · ${h.frontmatter.trigger} · ${ageLabel(h.frontmatter.created_at)}`);
+    }
+    lines.push('');
+    lines.push('Re-dispatch the paused work, then archive each via `pacekeeper-checkpoint handoffs archive <agent_id>` once absorbed.');
+    return lines;
+}
+
+/** additionalContext is capped at 10,000 chars by Claude Code (over that it
+ *  becomes a file path + 2,000-char preview). Leave headroom for the framing. */
+export const POST_COMPACT_BODY_CAP = 8000;
+
+function agoLabel(createdAt: string, nowMs: number): string {
+    const t = Date.parse(createdAt);
+    if (!Number.isFinite(t)) return '';
+    const mins = Math.max(0, Math.round((nowMs - t) / 60_000));
+    if (mins < 60) return `${mins}m ago`;
+    const h = Math.floor(mins / 60);
+    return `${h}h${mins % 60 > 0 ? `${(mins % 60).toString().padStart(2, '0')}m` : ''} ago`;
+}
+
+/**
+ * SessionStart(source: "compact") re-orientation. Compaction replaces the
+ * conversation with a lossy summary; the checkpoint Claude saved this session
+ * is the higher-fidelity record of goal, constraints and next step, so inject
+ * its body — active OR already archived. (Observed live: a checkpoint resumed
+ * in-session is archived, so the active-only banner found nothing and Claude
+ * carried on from the summary alone, drifting.) Handoffs still listed. Not a
+ * `resume` instruction: nothing needs consuming, this is orientation.
+ */
+export function buildPostCompactContext(
+    cwd: string,
+    checkpointDirName: string,
+    sessionStartedAt: number,
+    nowMs: number = Date.now()
+): string {
+    const ckpt = newestSince(cwd, checkpointDirName, sessionStartedAt);
+    const handoffs = listHandoffs(cwd, checkpointDirName);
+    const lines: string[] = [];
+    if (ckpt) {
+        const relPath = ckpt.path.startsWith(cwd) ? ckpt.path.slice(cwd.length + 1) : ckpt.path;
+        let body = ckpt.body;
+        if (body.length > POST_COMPACT_BODY_CAP) {
+            body = `${body.slice(0, POST_COMPACT_BODY_CAP)}\n\n[… truncated; full text in ${relPath}]`;
+        }
+        lines.push(
+            `🔁 Context was just compacted. The summary above is lossy; this is the checkpoint saved this session (lane ${laneOf(ckpt.frontmatter)}, ${agoLabel(ckpt.frontmatter.created_at, nowMs)}, ${relPath}):`,
+            '',
+            body,
+            '',
+            'Where the summary and this checkpoint disagree on the goal, constraints or rules, the checkpoint is the record; for steps taken after it was saved, the summary is. Continue from its "Next".'
+        );
+    } else {
+        lines.push(
+            '🔁 Context was just compacted and no checkpoint was saved this session, so the summary above is the only record of the goal. Before continuing, restate the goal, its constraints and the next step in three lines, then save a checkpoint via /cc-pacekeeper:checkpoint save at the next natural break.'
+        );
+    }
+    const handoffLines = formatHandoffLines(handoffs, checkpointDirName);
+    if (handoffLines.length > 0) lines.push('', ...handoffLines);
     return lines.join('\n');
 }
 
@@ -868,7 +937,7 @@ function formatCtxAutoSaveDirective(snap: Snapshot): string {
     return [
         status,
         '',
-        '🛑 Context window at critical — save now, do not ask: run /cc-pacekeeper:checkpoint save immediately, then continue on small steps until compaction runs.'
+        '🛑 Context window at critical — save now, do not ask: run /cc-pacekeeper:checkpoint save immediately, then continue on small steps until compaction runs. Do not start a new session for this: when Claude Code compacts, pacekeeper re-injects this checkpoint.'
     ].join('\n');
 }
 
