@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -28,7 +28,14 @@ beforeEach(() => {
 
 afterEach(() => {
     try { fs.rmSync(HOME, { recursive: true, force: true }); } catch { /* ignore */ }
+    for (const f of fixtures.splice(0)) {
+        try { fs.rmSync(f, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
 });
+
+/** Git fixtures that must sit outside the tmpdir to pass isUnsafeRoot. */
+const FIXTURE_BASE = path.join(import.meta.dir, '.tick-fixtures');
+const fixtures: string[] = [];
 
 function writeUsage(sessionUsage: number, resetInMs = 3 * 3600_000): string {
     const resetAt = new Date(Date.now() + resetInMs).toISOString();
@@ -433,6 +440,76 @@ describe('SessionStart(compact) re-orientation', () => {
         // The 830k pre-compaction reading must not leak into this tick.
         expect(ctx).not.toContain('Context window at critical');
         expect(ctx).not.toMatch(/ctx (8|9)\d%/);
+    });
+
+    /** HOME/proj as a git repo with a linked worktree at HOME/proj/.worktrees/wt. */
+    function projectWithWorktree(): { proj: string; wt: string } {
+        // NOT under HOME: everything below the tmpdir is an unsafe root, which
+        // lookupRoot refuses (it is where the CLI would refuse to save).
+        fs.mkdirSync(FIXTURE_BASE, { recursive: true });
+        const proj = fs.mkdtempSync(path.join(FIXTURE_BASE, 'proj-'));
+        fixtures.push(proj);
+        // Sandboxed HOME and no global config: a contributor's gpgsign or
+        // core.hooksPath must not decide whether this test can run.
+        const env = { ...process.env, HOME, GIT_CONFIG_GLOBAL: '/dev/null' };
+        execFileSync('git', ['init', '-q', proj], { env });
+        execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-q', '-m', 'init'], { cwd: proj, env });
+        const wt = path.join(proj, '.worktrees', 'wt');
+        execFileSync('git', ['worktree', 'add', '-q', '-b', 'wt', wt], { cwd: proj, env });
+        return { proj, wt };
+    }
+
+    // The CLI anchors saves at the main repo root, so a session running inside
+    // a linked worktree must look there too.
+    test('a session in a linked worktree finds the checkpoint saved at the main root', () => {
+        const { proj, wt } = projectWithWorktree();
+        const sid = newSid();
+        writeUsage(40);
+        const transcript = writeCompactedTranscript();
+        runTick({ session_id: sid, hook_event_name: 'UserPromptSubmit', prompt: 'hi', transcript_path: transcript, cwd: wt });
+        saveCheckpoint({
+            cwd: proj, checkpointDirName: '.claude-checkpoints',
+            frontmatter: { name: 'lane' }, body: '## Goal\nFinish the migration\n\n## Next\n1. Run bun test\n'
+        });
+        const out = runTick({ session_id: sid, hook_event_name: 'SessionStart', source: 'compact', transcript_path: transcript, cwd: wt });
+        const ctx = JSON.parse(out).hookSpecificOutput.additionalContext as string;
+        expect(ctx).toContain('Finish the migration');
+        expect(ctx).not.toContain('no checkpoint was saved this session');
+    });
+
+    test('the startup banner in a worktree points at the main root checkpoint', () => {
+        const { proj, wt } = projectWithWorktree();
+        writeUsage(40);
+        saveCheckpoint({
+            cwd: proj, checkpointDirName: '.claude-checkpoints',
+            frontmatter: { name: 'lane' }, body: '## Goal\nFinish the migration\n'
+        });
+        const out = runTick({ session_id: newSid(), hook_event_name: 'SessionStart', source: 'startup', cwd: wt });
+        const ctx = JSON.parse(out).hookSpecificOutput.additionalContext as string;
+        expect(ctx).toContain('Active checkpoint found');
+    });
+
+    // Claude Code fires SessionStart(compact) ~200 ms before it flushes the
+    // boundary line, so the transcript still describes the discarded
+    // conversation: report nothing rather than its size.
+    // `blockPct` also exercises the auto-loop path: above auto.five_hour_pct
+    // its once-per-block directive fires on the same tick and must not re-arm.
+    test.each([40, 90])('a compact start before the boundary is flushed reports no context and disarms the auto-save (5h %i%%)', (blockPct) => {
+        const sid = newSid();
+        writeUsage(blockPct);
+        const transcript = writeTranscript(190_000); // pre-compaction size, no boundary yet
+        // Arm ctxAutoSaveArmed the way a real critical climb would (above
+        // auto.five_hour_pct the auto-loop directive covers the same save).
+        expect(runTick({ session_id: sid, hook_event_name: 'PreToolUse', tool_name: 'Read', transcript_path: transcript }))
+            .toContain('ctx 95%');
+        expect(sessionState()[sid]?.ctxAutoSaveArmed).toBe(true);
+
+        const out = runTick({ session_id: sid, hook_event_name: 'SessionStart', source: 'compact', transcript_path: transcript });
+        const ctx = JSON.parse(out).hookSpecificOutput.additionalContext as string;
+        expect(ctx).toContain('Context was just compacted');
+        expect(ctx).not.toContain('Context window at critical');
+        expect(ctx).not.toContain('ctx 9');
+        expect(sessionState()[sid]?.ctxAutoSaveArmed).toBe(false);
     });
 
     test('a compact start does not ask the one-time channel onboarding question', () => {

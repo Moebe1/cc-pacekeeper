@@ -24,6 +24,12 @@ Claude from the checkpoint it saved.
 
 ### Fixed
 
+- **Post-compaction tick, first live run.** Two fixes from the first real `/compact` on
+  the branch: the tick now looks for checkpoints at the main repo root (where the CLI
+  anchors them) instead of the hook's worktree cwd, and on a compact `SessionStart` it
+  treats the context as unknown until the `compact_boundary` line is the newest transcript
+  entry — Claude Code fires the hook before flushing that line — and disarms the ctx
+  auto-save explicitly.
 - **Checkpoints were saved without a session id or context meter.** The skill named
   `$CLAUDE_SESSION_ID` and `$CLAUDE_TRANSCRIPT_PATH`, neither of which exists in the
   Bash tool (every checkpoint on disk had `session_id:` blank and no `context_pct`).

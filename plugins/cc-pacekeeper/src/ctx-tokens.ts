@@ -56,6 +56,8 @@ export interface ContextTokens {
     contextLength: number;
     /** Model id from the same assistant turn, if present. */
     model?: string;
+    /** Set when the reading came from a compact_boundary entry, not a turn. */
+    fromCompactBoundary?: true;
 }
 
 export function readContextTokens(transcriptPath: string): ContextTokens | null {
@@ -76,7 +78,7 @@ export function readContextTokens(transcriptPath: string): ContextTokens | null 
             if (boundary.data.isSidechain === true) continue;
             const post = boundary.data.compactMetadata?.postTokens;
             if (post === undefined) return null;
-            return { inputTotal: post, outputTotal: 0, cached: 0, contextLength: post };
+            return { inputTotal: post, outputTotal: 0, cached: 0, contextLength: post, fromCompactBoundary: true };
         }
         const parsed = AssistantMessageSchema.safeParse(obj);
         if (!parsed.success) continue;

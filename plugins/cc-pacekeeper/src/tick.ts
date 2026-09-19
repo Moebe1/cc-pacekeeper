@@ -3,6 +3,7 @@ import { bootstrapConfigIfMissing, isProjectDenied, loadConfig, type Config } fr
 import { contextPercent, readAutoCompactEnabled, readContextTokens, readMostRecentModel, resolveUsableContextWindow } from './ctx-tokens';
 import { emitAdditionalContext, emitBlock, emitEmpty, readStdinJson } from './hook-io';
 import { recordCrash } from './crash-log';
+import { lookupRoot } from './resolve-root';
 import { laneOf, listActive, newestSince } from './checkpoint';
 import {
     computeSnapshot,
@@ -35,6 +36,28 @@ import {
     hasHandoff,
     RESUME_MARKER
 } from './agent-budget';
+
+/**
+ * Checkpoints and handoffs are anchored by the CLI at the main repo root, so
+ * every lookup here resolves the hook's cwd the same way. The probe costs four
+ * `git rev-parse` calls (~50 ms), so it is memoized per cwd for the life of the
+ * hook process and paid only when a lookup actually happens.
+ *
+ * `isProjectDenied` deliberately stays on the RAW cwd: the denylist is about
+ * the directory the session runs in. The edge that buys is an OUT-OF-TREE
+ * worktree of a denied project (`git worktree add ../secret-wt`), which is not
+ * under the denied prefix and whose lookups then resolve to the denied main
+ * root; an in-tree worktree (this repo's `.claude/worktrees/`) stays denied.
+ */
+let memoFor: string | undefined;
+let cachedLookupRoot: string | undefined;
+function lookupRootFor(cwd: string): string {
+    if (memoFor !== cwd) {
+        memoFor = cwd;
+        cachedLookupRoot = lookupRoot(cwd);
+    }
+    return cachedLookupRoot!;
+}
 
 /** A prompt is a marker-triggered system prompt only if it STARTS with the
  * marker — text that merely QUOTES a marker (a pasted report, a subagent
@@ -84,7 +107,7 @@ async function main(): Promise<void> {
     }
 
     if (event === 'SubagentStop') {
-        emitAdditionalContext(event, buildSubagentStopContext(cfg, sessionId, agentId, cwd));
+        emitAdditionalContext(event, buildSubagentStopContext(cfg, sessionId, agentId, lookupRootFor(cwd)));
         return;
     }
 
@@ -151,8 +174,8 @@ async function main(): Promise<void> {
         // After a compaction the summary is all Claude has; hand it this
         // session's checkpoint body instead of a pointer to run `resume`.
         sessionStartBlock = isCompactStart
-            ? buildPostCompactContext(cwd, cfg.checkpoint_dir_name, sessionEntry.sessionStartedAt, sessionId, nowMs)
-            : buildSessionStartContext(cwd, cfg.checkpoint_dir_name);
+            ? buildPostCompactContext(lookupRootFor(cwd), cfg.checkpoint_dir_name, sessionEntry.sessionStartedAt, sessionId, nowMs)
+            : buildSessionStartContext(lookupRootFor(cwd), cfg.checkpoint_dir_name);
         // One-time channel onboarding. SessionStart, not Stop: Stop fires every
         // turn-end, so the question would repeat all session. Not on a compact
         // start either — that is the same session, mid-work.
@@ -166,7 +189,12 @@ async function main(): Promise<void> {
     //    calls are a once-per-model context-window fetch on cache-miss (below)
     //    and, on SessionStart, a usage refetch when the cache is detectably
     //    stale (further below). ──
-    const ctxTokens = stdin.transcript_path ? readContextTokens(stdin.transcript_path) : null;
+    const rawCtx = stdin.transcript_path ? readContextTokens(stdin.transcript_path) : null;
+    // Claude Code fires SessionStart(compact) before it flushes the
+    // compact_boundary line (observed ~200 ms early). Until the boundary is the
+    // newest entry, the transcript still describes the discarded conversation,
+    // so on a compact start anything but a boundary reading is unknown.
+    const ctxTokens = isCompactStart && !rawCtx?.fromCompactBoundary ? null : rawCtx;
     const model = stdin.model
         ?? ctxTokens?.model
         ?? (stdin.transcript_path ? readMostRecentModel(stdin.transcript_path) : null)
@@ -232,6 +260,12 @@ async function main(): Promise<void> {
     {
         const ctxReading = snap.readings.find(r => r.meter === 'context');
         const armed = sessionEntry.ctxAutoSaveArmed ?? false;
+        if (isCompactStart && armed) {
+            // The compaction ran: whatever armed the directive is gone, and the
+            // reading that would normally disarm it is unknown on this tick.
+            // The auto-loop below must not re-arm on this tick either.
+            updateSession(key, nowMs, { ctxAutoSaveArmed: false });
+        }
         if (ctxReading && ctxReading.level === 'critical' && !armed) {
             // readAutoCompactEnabled() is an fs read; only on the rare tick
             // that actually fires the directive.
@@ -257,7 +291,9 @@ async function main(): Promise<void> {
         if (five && !five.stale && five.percent >= cfg.auto.five_hour_pct && resetKey
             && sessionEntry.lastAutoFireResetAt !== resetKey) {
             autoDirective = formatAutoLoopDirective(snap, cfg, five.resetsAt!);
-            updateSession(key, nowMs, { lastAutoFireResetAt: resetKey, ctxAutoSaveArmed: true });
+            // Arming belongs to the ctx climb, which a compact start has just
+            // ended; this directive's own save instruction stands either way.
+            updateSession(key, nowMs, { lastAutoFireResetAt: resetKey, ...(isCompactStart ? {} : { ctxAutoSaveArmed: true }) });
             ctxAutoSaveDirective = null; // combined into autoDirective already
         }
     }
@@ -278,7 +314,7 @@ async function main(): Promise<void> {
         // (meters + active lane + pending handoffs) instead of the normal
         // per-prompt heartbeat.
         if (isMainThread && promptStartsWithMarker(stdin.prompt, RESUME_MARKER)) {
-            injection = buildResumeOrientation(cwd, cfg, snap);
+            injection = buildResumeOrientation(lookupRootFor(cwd), cfg, snap);
         } else {
             // Always inject the combined time + meter line, plus any AFK-return note
             // and any debounced warn/critical directive. This is the per-prompt
@@ -402,8 +438,8 @@ async function main(): Promise<void> {
         // Walking away from an idle session with nothing to report is not worth
         // a message.
         if (escalated && isAway()) {
-            const pending = listActive(cwd, cfg.checkpoint_dir_name).length > 0
-                || listHandoffs(cwd, cfg.checkpoint_dir_name).length > 0;
+            const pending = listActive(lookupRootFor(cwd), cfg.checkpoint_dir_name).length > 0
+                || listHandoffs(lookupRootFor(cwd), cfg.checkpoint_dir_name).length > 0;
             if (pending) {
                 const away = awayDirective(cfg, snap.readings
                     // `stale` readings are last-known values from an ended
@@ -438,8 +474,8 @@ async function main(): Promise<void> {
                 const lastDirectiveAt = sessionEntry.lastKeepaliveDirectiveAt ?? 0;
                 const debounceDue = nowMs - lastDirectiveAt >= cfg.keepalive.interval_min * 60_000;
                 if (debounceDue) {
-                    const hasPendingWork = listActive(cwd, cfg.checkpoint_dir_name).length > 0
-                        || listHandoffs(cwd, cfg.checkpoint_dir_name).length > 0;
+                    const hasPendingWork = listActive(lookupRootFor(cwd), cfg.checkpoint_dir_name).length > 0
+                        || listHandoffs(lookupRootFor(cwd), cfg.checkpoint_dir_name).length > 0;
                     const ka = keepaliveDirective({
                         cfg, snap,
                         // Harness registry first (survives /clear + resume); transcript scan as fallback.
@@ -612,7 +648,7 @@ export function reminderMetersToFire(
         if (r.level !== 'warn' && r.level !== 'critical') return false;
         const resetKey = reminderResetKey(r);
         if (resetKey === undefined) return false;   // no window → not coverage-gated
-        return levelGt(r.level, coveredLevel(entry, r, resetKey, cwd, cfg));
+        return levelGt(r.level, coveredLevel(entry, r, resetKey, lookupRootFor(cwd), cfg));
     });
 }
 

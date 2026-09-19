@@ -64,6 +64,7 @@ describe('readContextTokens', () => {
         fs.writeFileSync(TRANSCRIPT, content);
         const tokens = readContextTokens(TRANSCRIPT)!;
         expect(tokens.inputTotal).toBe(99);
+        expect(tokens.fromCompactBoundary).toBeUndefined();
     });
 
     test('after a compact_boundary with no assistant turn since, reports the boundary postTokens', () => {
@@ -76,6 +77,7 @@ describe('readContextTokens', () => {
         const t = readContextTokens(TRANSCRIPT)!;
         expect(t.contextLength).toBe(21_531);
         expect(t.model).toBeUndefined();
+        expect(t.fromCompactBoundary).toBe(true);
     });
 
     test('an assistant turn after the boundary takes over from postTokens', () => {

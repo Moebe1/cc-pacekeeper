@@ -181,6 +181,28 @@ export function resolveProjectRoot(input: ResolveInput): string {
 }
 
 /**
+ * Where checkpoints for `cwd` live: the main repo root when `cwd` is inside a
+ * linked worktree (the CLI anchors saves there — see gitToplevel), else the
+ * repo root, else `cwd` itself. Hook-safe: never throws, never refuses.
+ * Observed live: a session in `narrator/.worktrees/beta-14` compacted and the
+ * tick looked in the worktree's own dir, missing the checkpoint the CLI had
+ * written at the main root.
+ */
+export function lookupRoot(cwd: string): string {
+    try {
+        const info = worktreeInfo(cwd);
+        const root = info?.mainRoot ?? cwd;
+        // The CLI refuses to save at an unsafe root (a repo rooted at $HOME or
+        // under /tmp), so there is nothing of ours to find there — and another
+        // project's stray checkpoint must not be read as this one's.
+        if (isUnsafeRoot(root)) return cwd;
+        try { return fs.realpathSync(root); } catch { return root; }
+    } catch {
+        return cwd;
+    }
+}
+
+/**
  * The transcript for a session id, found by scanning every project directory
  * under `<configDir>/projects/` for `<sessionId>.jsonl` (the project-dir
  * naming rule is not relied on). Newest mtime wins if several exist. Undefined
